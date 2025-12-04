@@ -25,18 +25,42 @@ class FlopTracker:
 
     def __init__(self, run_name: Optional[str] = None):
         self.run_name = run_name
+        # FLOP del modello
         self._raw_flop: int = 0
-        self._total_flop: float = 0.0 
+        self._total_flop: float = 0.0
+        # operazioni di preprocessing/tokenizer
+        self._preproc_ops: int = 0
+        # Totale aggregato: FLOP modello + operazioni preprocessing/tokenizer
+        self._total_operations: float = 0.0
+
         self._history: dict[str, Any] = {}
+
+    # -------------------- PROPRIETÀ DI LETTURA -------------------- #
 
     @property
     def raw_flop(self) -> int:
-        """FLOP (somma dei layer)."""
+        """FLOP (somma dei layer del modello, senza preprocessing)."""
         return self._raw_flop
 
     @property
     def total_flop(self) -> float:
+        """FLOP totali del modello"""
         return self._total_flop
+
+    @property
+    def total_preproc_ops(self) -> int:
+        """
+        Operazioni totali di preprocessing/tokenizer registrate dal Tracker.
+        """
+        return self._preproc_ops
+
+    @property
+    def total_operations(self) -> float:
+        """
+        Metrica aggregata:
+            FLOP del modello + operazioni di preprocessing/tokenizer.
+        """
+        return self._total_operations
 
     @property
     def history(self) -> dict[str, Any]:
@@ -63,13 +87,12 @@ class FlopTracker:
     ) -> "FlopTracker":
         """
         Esegue training + tracking FLOP per un modello PyTorch.
-        questa funzione incapsula loop per batch/epoch e print dei FLOP totatli (totalmente trasparente per l'utente).
+        Questa funzione incapsula loop per batch/epoch e stampa i FLOP totali
+        (totalmente trasparente per l'utente).
         """
 
         if device is not None:
             model.to(device)
-
-        from tracker import Tracker
 
         with Tracker(
             model=model,
@@ -98,7 +121,7 @@ class FlopTracker:
                         loss = loss_fn(output, yb)
                         loss.backward()
                         optimizer.step()
-                    
+
                 # log per epoch (se abilitato)
                 if tr.logger is not None and hasattr(tr.logger, "log_epoch"):
                     tr.logger.log_epoch(
@@ -107,9 +130,11 @@ class FlopTracker:
                         cumulative_flop=tr.total_flop,
                     )
 
-            
+            # metriche dal Tracker
             self._raw_flop = tr.total_flop
-            self._total_flop = float(self._raw_flop)
+            self._total_flop = float(tr.total_flop)
+            self._preproc_ops = tr.total_preproc_ops
+            self._total_operations = tr.total_operations
 
             self._history["backend"] = backend
             self._history["export_path"] = export_path
@@ -120,9 +145,14 @@ class FlopTracker:
         # STAMPA AUTOMATICA DEI FLOP TOTALI
         run_label = f"[{self.run_name}]" if self.run_name is not None else ""
         print(
-            f"[FlopTracker{run_label}] FLOP totali: {self._total_flop:.0f} "
+            f"[FlopTracker{run_label}] FLOP totali (modello): {self._total_flop:.0f} "
             f"(raw: {self._raw_flop})"
         )
+        if self._preproc_ops > 0:
+            print(
+                f"[FlopTracker{run_label}] Operazioni preprocessing/tokenizer: "
+                f"{self._preproc_ops} (totale aggregato: {self._total_operations:.0f})"
+            )
 
         return self
 
@@ -146,7 +176,7 @@ class FlopTracker:
     ) -> "FlopTracker":
         """
         Esegue training / inferenza per un modello HuggingFace (transformers),
-        stimando i FLOP.
+        stimando i FLOP del modello (e se abilitato il wrapper, le operazioni di tokenizer).
 
         Assunzioni:
         - dataloader restituisce dict con chiavi tipo:
@@ -155,26 +185,10 @@ class FlopTracker:
           e optimizer non è None, facciamo training:
             loss = output.loss; loss.backward(); optimizer.step().
         - se optimizer è None, facciamo solo forward (inferenza).
-
-        Uso tipico:
-
-            ft = FlopTracker(run_name="bert_mrpc").hf_bind(
-                model=model,
-                dataloader=train_loader,
-                optimizer=optimizer,
-                device="cuda",
-                epochs=3,
-                log_per_batch=True,
-                export_path="bert_flop.csv",
-                use_wandb=True,
-                wandb_project="flop-thesis",
-            )
         """
 
         if device is not None:
             model.to(device)
-
-        from tracker import Tracker
 
         with Tracker(
             model=model,
@@ -220,7 +234,9 @@ class FlopTracker:
                     )
 
             self._raw_flop = tr.total_flop
-            self._total_flop = float(self._raw_flop)
+            self._total_flop = float(tr.total_flop)
+            self._preproc_ops = tr.total_preproc_ops
+            self._total_operations = tr.total_operations
 
             self._history["backend"] = backend
             self._history["export_path"] = export_path
@@ -235,10 +251,15 @@ class FlopTracker:
             f"[FlopTracker{run_label}] FLOP totali (HF, mode={mode_label}): "
             f"{self._total_flop:.0f} (raw: {self._raw_flop})"
         )
+        if self._preproc_ops > 0:
+            print(
+                f"[FlopTracker{run_label}] Operazioni preprocessing/tokenizer: "
+                f"{self._preproc_ops} (totale aggregato: {self._total_operations:.0f})"
+            )
 
         return self
 
- # -------------------- SKLEARN BIND -------------------- #
+    # -------------------- SKLEARN BIND -------------------- #
 
     def sklearn_bind(
         self,
@@ -277,10 +298,9 @@ class FlopTracker:
         nei log del backend sklearn.
         """
 
-        from tracker import Tracker
-
         log_per_batch = log_per_call
-        log_per_epoch = False  
+        log_per_epoch = False
+
         with Tracker(
             model=model,
             backend=backend,
@@ -306,6 +326,8 @@ class FlopTracker:
 
             self._raw_flop = tr.total_flop
             self._total_flop = float(self._raw_flop)
+            self._preproc_ops = tr.total_preproc_ops
+            self._total_operations = tr.total_operations
 
             self._history["backend"] = backend
             self._history["export_path"] = export_path
@@ -318,7 +340,10 @@ class FlopTracker:
             f"[FlopTracker{run_label}] FLOP totali (sklearn, mode={mode}): "
             f"{self._total_flop:.0f} (raw: {self._raw_flop})"
         )
+        if self._preproc_ops > 0:
+            print(
+                f"[FlopTracker{run_label}] Operazioni preprocessing/tokenizer: "
+                f"{self._preproc_ops} (totale aggregato: {self._total_operations:.0f})"
+            )
 
         return self
-
-
