@@ -11,7 +11,8 @@ class Tracker(AbstractContextManager):
 
     - Instanzia backend e logger
     - Aggancia gli hook
-    - Espone total_flop
+    - Espone total_flop (FLOPs del modello)
+    - Tiene traccia opzionale delle operazioni di preprocessing/tokenizer
     """
 
     def __init__(
@@ -38,6 +39,12 @@ class Tracker(AbstractContextManager):
 
         self.backend = create_backend(model, backend, logger=self.logger)
 
+        # --- contatori per operazioni di preprocessing/tokenizer 
+        # registrati tramite add_preproc_ops(...).
+        self.preproc_ops: int = 0
+        self.preproc_ops_cumulative: int = 0
+
+    # Context manager
     def __enter__(self):
         self.backend.start()
         return self
@@ -46,7 +53,47 @@ class Tracker(AbstractContextManager):
         self.backend.stop()
         if self.logger is not None:
             self.logger.close()
-        return False 
+        return False
+
+    # ---------------- FLOPs del modello  ----------------
     @property
     def total_flop(self) -> int:
+        """
+        Restituisce i FLOPs totali del MODELLO (valore fornito dal backend).
+        Non include le operazioni di preprocessing/tokenizer.
+        """
         return self.backend.get_total_flop()
+
+    # -------------  API per le operazioni di preprocessing ----------
+
+    def add_preproc_ops(self, ops: int) -> None:
+        """
+        Registra un numero di operazioni di preprocessing/tokenizer.
+
+        Esempio:
+            n_chars = ...
+            n_tokens = ...
+            tracker.add_preproc_ops(n_chars + n_tokens)
+        """
+        if ops is None or ops <= 0:
+            return
+        self.preproc_ops += int(ops)
+        self.preproc_ops_cumulative += int(ops)
+
+    @property
+    def total_preproc_ops(self) -> int:
+        """
+        Restituisce il totale delle operazioni di preprocessing/tokenizer registrate.
+        """
+        return self.preproc_ops_cumulative
+
+    @property
+    def total_operations(self) -> float:
+        """
+        Restituisce un totale aggregato:
+            FLOPs del modello + operazioni di preprocessing/tokenizer.
+
+        Nota: questo non è più un "pure FLOPs count", ma una metrica composita
+        che puoi usare in tesi per discutere il costo complessivo modello+pipeline.
+        """
+        return float(self.total_flop + self.preproc_ops_cumulative)
