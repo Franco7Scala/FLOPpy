@@ -92,8 +92,5 @@ class Tracker(AbstractContextManager):
         """
         Restituisce un totale aggregato:
             FLOPs del modello + operazioni di preprocessing/tokenizer.
-
-        Nota: questo non è più un "pure FLOPs count", ma una metrica composita
-        che puoi usare in tesi per discutere il costo complessivo modello+pipeline.
         """
         return float(self.total_flop + self.preproc_ops_cumulative)
