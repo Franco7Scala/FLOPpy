@@ -30,7 +30,3 @@ class BaseBackend(ABC):
     def set_epoch(self, epoch: int):
         """Opzionale: permette di tracciare l'epoch corrente nei log."""
         self._epoch_idx = epoch
-
-    def add_extra_flop(self, flops: int) -> None:
-        """Aggiunge FLOPs esterni al conteggio (default: no-op)."""
-        return
