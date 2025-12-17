@@ -556,3 +556,15 @@ class TorchBackend(BaseBackend):
         num_indices = x.numel()
         emb_dim = layer.embedding_dim
         return num_indices * emb_dim
+
+    def add_extra_flop(self, flops: int) -> None:
+    """
+    Aggiunge FLOPs esterni (es. calcolo della loss) al batch corrente.
+    Verranno inclusi nel totale a fine batch.
+    """
+    if flops is None:
+        return
+    fl = int(flops)
+    if fl <= 0:
+        return
+    self._current_batch_flop += fl
