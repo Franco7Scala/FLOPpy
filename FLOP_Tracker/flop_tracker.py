@@ -2,25 +2,34 @@ from __future__ import annotations
 
 from typing import Optional, Any
 
+from tracker import Tracker
+
 
 class FlopTracker:
     """
     Entry point pubblico della libreria.
+
+    Uso:
+        ft = FlopTracker(run_name="dp_cnn").torch_bind(
+            model=model,
+            optimizer=optimizer,
+            loss_fn=loss_fn,
+            train_loader=train_loader,
+            device=device,
+            epochs=10,
+            log_per_batch=True,
+            export_path="flop.csv",
+            use_wandb=False,
+        )
     """
 
     def __init__(self, run_name: Optional[str] = None):
         self.run_name = run_name
-
         # FLOP del modello
         self._raw_flop: int = 0
         self._total_flop: float = 0.0
-
         # operazioni di preprocessing/tokenizer
         self._preproc_ops: int = 0
-
-        # FLOPs della loss 
-        self._loss_flop: int = 0
-
         # Totale aggregato: FLOP modello + operazioni preprocessing/tokenizer
         self._total_operations: float = 0.0
 
@@ -35,18 +44,15 @@ class FlopTracker:
 
     @property
     def total_flop(self) -> float:
-        """FLOP totali del modello (include anche i FLOP della loss se abilitata)."""
+        """FLOP totali del modello"""
         return self._total_flop
 
     @property
     def total_preproc_ops(self) -> int:
-        """Operazioni totali di preprocessing/tokenizer registrate dal Tracker."""
+        """
+        Operazioni totali di preprocessing/tokenizer registrate dal Tracker.
+        """
         return self._preproc_ops
-
-    @property
-    def total_loss_flop(self) -> int:
-        """FLOP totali attribuiti alla loss."""
-        return self._loss_flop
 
     @property
     def total_operations(self) -> float:
@@ -59,68 +65,6 @@ class FlopTracker:
     @property
     def history(self) -> dict[str, Any]:
         return self._history
-
-    # -------------------- STIMA LOSS FLOPs -------------------- #
-
-    def _estimate_loss_flop(self, loss_fn, preds, targets) -> int:
-        """
-        Stima teorica e hardware-agnostica dei FLOP della loss (forward). 
-        """
-        try:
-            import torch
-            import torch.nn as nn
-        except Exception:
-            return 0
-
-        if loss_fn is None or preds is None:
-            return 0
-
-        if not hasattr(preds, "numel"):
-            return 0
-
-        N = int(preds.numel())
-
-        # --- Regression losses ---
-        if isinstance(loss_fn, nn.MSELoss):
-            # (p-t)^2: sub + mul; reduce: (N-1) add
-            return max(0, 2 * N + (N - 1))
-
-        if isinstance(loss_fn, nn.L1Loss):
-            # |p-t|: sub + abs; reduce
-            return max(0, 2 * N + (N - 1))
-
-        # --- Probabilistic/classification losses ---
-        if isinstance(loss_fn, nn.NLLLoss):
-            # input log-prob (B,C), target (B,)
-            # gather B + reduce (B-1)
-            B = int(preds.shape[0]) if hasattr(preds, "shape") and preds.dim() > 0 else 1
-            return max(0, B + (B - 1))
-
-        if isinstance(loss_fn, nn.CrossEntropyLoss):
-            # CE = LogSoftmax + NLL
-            B = int(preds.shape[0]) if hasattr(preds, "shape") and preds.dim() > 0 else 1
-            C = int(preds.shape[-1]) if hasattr(preds, "shape") and preds.dim() > 0 else 1
-            # logsoftmax approx per sample: ~4C
-            return max(0, B * (4 * C) + B + (B - 1))
-
-        if isinstance(loss_fn, nn.KLDivLoss):
-            # approx 3 ops/elem + reduce
-            return max(0, 3 * N + (N - 1))
-
-        if isinstance(loss_fn, nn.BCELoss):
-            # approx 6 ops/elem + reduce
-            return max(0, 6 * N + (N - 1))
-
-        if isinstance(loss_fn, nn.BCEWithLogitsLoss):
-            # sigmoid + BCE approx ~10 ops/elem + reduce
-            return max(0, 10 * N + (N - 1))
-
-        if isinstance(loss_fn, (nn.TripletMarginLoss, nn.TripletMarginWithDistanceLoss)):
-            # difficile stimare senza vedere le triple; fallback conservativo
-            return max(0, 5 * N)
-
-        # fallback (se non riconosciuta)
-        return 0
 
     # -------------------- TORCH BIND -------------------- #
 
@@ -143,16 +87,12 @@ class FlopTracker:
     ) -> "FlopTracker":
         """
         Esegue training + tracking FLOP per un modello PyTorch.
-        Include (opzionalmente) anche una stima dei FLOP della loss.
+        Questa funzione incapsula loop per batch/epoch e stampa i FLOP totali
+        (totalmente trasparente per l'utente).
         """
-
-        from tracker import Tracker
 
         if device is not None:
             model.to(device)
-
-        # reset contatori
-        self._loss_flop = 0
 
         with Tracker(
             model=model,
@@ -179,14 +119,6 @@ class FlopTracker:
 
                     if loss_fn is not None:
                         loss = loss_fn(output, yb)
-
-                        # stima FLOP loss (forward) e aggiunta al batch corrente
-                        loss_flop = self._estimate_loss_flop(loss_fn, output, yb)
-                        self._loss_flop += int(loss_flop)
-
-                        if hasattr(tr.backend, "add_extra_flop"):
-                            tr.backend.add_extra_flop(int(loss_flop))
-
                         loss.backward()
                         optimizer.step()
 
@@ -209,8 +141,6 @@ class FlopTracker:
             self._history["use_wandb"] = use_wandb
             self._history["wandb_project"] = wandb_project
             self._history["epochs"] = epochs
-            self._history["loss_flop"] = self._loss_flop
-            self._history["loss_name"] = loss_fn.__class__.__name__ if loss_fn is not None else None
 
         # STAMPA AUTOMATICA DEI FLOP TOTALI
         run_label = f"[{self.run_name}]" if self.run_name is not None else ""
@@ -218,12 +148,6 @@ class FlopTracker:
             f"[FlopTracker{run_label}] FLOP totali (modello): {self._total_flop:.0f} "
             f"(raw: {self._raw_flop})"
         )
-
-        if loss_fn is not None:
-            print(
-                f"[FlopTracker{run_label}] FLOP loss (forward): {self._loss_flop}"
-            )
-
         if self._preproc_ops > 0:
             print(
                 f"[FlopTracker{run_label}] Operazioni preprocessing/tokenizer: "
@@ -253,11 +177,15 @@ class FlopTracker:
         """
         Esegue training / inferenza per un modello HuggingFace (transformers),
         stimando i FLOP del modello (e se abilitato il wrapper, le operazioni di tokenizer).
-        Nota: qui non stimiamo FLOP della loss separatamente, perché in HF la loss è
-        generalmente interna al forward del modello e quindi già inclusa negli hook.
-        """
 
-        from tracker import Tracker
+        Assunzioni:
+        - dataloader restituisce dict con chiavi tipo:
+          "input_ids", "attention_mask", "labels", ecc.
+        - se il model restituisce un oggetto con attributo .loss
+          e optimizer non è None, facciamo training:
+            loss = output.loss; loss.backward(); optimizer.step().
+        - se optimizer è None, facciamo solo forward (inferenza).
+        """
 
         if device is not None:
             model.to(device)
@@ -279,6 +207,7 @@ class FlopTracker:
                     tr.backend.set_epoch(epoch)
 
                 for batch in dataloader:
+                    # spostiamo tutti i tensori su device
                     if device is not None:
                         batch = {
                             k: (v.to(device) if hasattr(v, "to") else v)
@@ -290,11 +219,13 @@ class FlopTracker:
 
                     output = model(**batch)
 
+                    # se l'output ha 'loss' e c’è un optimizer, facciamo training
                     loss = getattr(output, "loss", None)
                     if loss is not None and optimizer is not None:
                         loss.backward()
                         optimizer.step()
 
+                # log per epoch HF (se richiesto)
                 if tr.logger is not None and hasattr(tr.logger, "log_epoch"):
                     tr.logger.log_epoch(
                         epoch=epoch,
@@ -336,7 +267,7 @@ class FlopTracker:
         X,
         y=None,
         *,
-        mode: str = "fit",
+        mode: str = "fit",  # "fit", "predict" o "fit_predict"
         backend: str = "sklearn",
         log_per_call: bool = True,
         export_path: Optional[str] = None,
@@ -346,9 +277,26 @@ class FlopTracker:
     ) -> "FlopTracker":
         """
         Esegue fit/predict per un modello sklearn e traccia i FLOP.
-        """
 
-        from tracker import Tracker
+        Esempi:
+            ft = FlopTracker(run_name="lr").sklearn_bind(
+                model=clf,
+                X=X_train,
+                y=y_train,
+                mode="fit",
+                log_per_call=True,
+                export_path="flop_lr.csv",
+            )
+
+            ft = FlopTracker(run_name="knn").sklearn_bind(
+                model=knn,
+                X=X_test,
+                mode="predict",
+            )
+
+        Ogni chiamata a fit/predict viene trattata come un "batch"
+        nei log del backend sklearn.
+        """
 
         log_per_batch = log_per_call
         log_per_epoch = False
@@ -365,6 +313,7 @@ class FlopTracker:
             run_name=self.run_name,
         ) as tr:
 
+            # eseguiamo fit/predict secondo la modalità scelta
             if mode == "fit":
                 model.fit(X, y)
             elif mode == "predict":
