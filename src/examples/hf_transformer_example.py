@@ -56,15 +56,11 @@ def main():
     # Istanzio il FlopTracker
     ft = FlopTracker(run_name="hf_distilbert_sst2_with_tokenizer").hf_bind(
         model=model,
-        dataloader=loader,
-        optimizer=optimizer,
-        device=device,
-        epochs=1,
-        log_per_batch=True,
-        log_per_epoch=True,
         export_path="hf_distilbert_flop_with_tokenizer.csv",
         use_wandb=False,
     )
+
+    #tranier.train_model(model, epochs, batch_size, ...)
 
     # FLOP del modello 
     print("Raw FLOP (model):", ft.raw_flop)

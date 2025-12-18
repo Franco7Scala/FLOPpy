@@ -80,7 +80,8 @@ class NewLayersNet(nn.Module):
 
 
 def main():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"#"cuda" if torch.cuda.is_available() else "cpu"
+    print(device)
 
     # Dataset fittizio
     x = torch.randn(128, 3, 32, 32)
@@ -91,7 +92,7 @@ def main():
     model.to(device)
 
     # test DataParallel
-    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+    if "cuda" in device:
         model = nn.DataParallel(model)
 
     optimizer = torch.optim.SGD(model.parameters(), lr=0.01)

@@ -30,8 +30,6 @@ class FlopTracker:
         self._total_flop: float = 0.0
         # operazioni di preprocessing/tokenizer
         self._preproc_ops: int = 0
-        # Totale aggregato: FLOP modello + operazioni preprocessing/tokenizer
-        self._total_operations: float = 0.0
 
         self._history: dict[str, Any] = {}
 
@@ -53,14 +51,6 @@ class FlopTracker:
         Operazioni totali di preprocessing/tokenizer registrate dal Tracker.
         """
         return self._preproc_ops
-
-    @property
-    def total_operations(self) -> float:
-        """
-        Metrica aggregata:
-            FLOP del modello + operazioni di preprocessing/tokenizer.
-        """
-        return self._total_operations
 
     @property
     def history(self) -> dict[str, Any]:
@@ -134,7 +124,6 @@ class FlopTracker:
             self._raw_flop = tr.total_flop
             self._total_flop = float(tr.total_flop)
             self._preproc_ops = tr.total_preproc_ops
-            self._total_operations = tr.total_operations
 
             self._history["backend"] = backend
             self._history["export_path"] = export_path
@@ -151,7 +140,6 @@ class FlopTracker:
         if self._preproc_ops > 0:
             print(
                 f"[FlopTracker{run_label}] Operazioni preprocessing/tokenizer: "
-                f"{self._preproc_ops} (totale aggregato: {self._total_operations:.0f})"
             )
 
         return self
@@ -236,7 +224,6 @@ class FlopTracker:
             self._raw_flop = tr.total_flop
             self._total_flop = float(tr.total_flop)
             self._preproc_ops = tr.total_preproc_ops
-            self._total_operations = tr.total_operations
 
             self._history["backend"] = backend
             self._history["export_path"] = export_path
@@ -254,7 +241,6 @@ class FlopTracker:
         if self._preproc_ops > 0:
             print(
                 f"[FlopTracker{run_label}] Operazioni preprocessing/tokenizer: "
-                f"{self._preproc_ops} (totale aggregato: {self._total_operations:.0f})"
             )
 
         return self
@@ -327,7 +313,6 @@ class FlopTracker:
             self._raw_flop = tr.total_flop
             self._total_flop = float(self._raw_flop)
             self._preproc_ops = tr.total_preproc_ops
-            self._total_operations = tr.total_operations
 
             self._history["backend"] = backend
             self._history["export_path"] = export_path
@@ -343,7 +328,6 @@ class FlopTracker:
         if self._preproc_ops > 0:
             print(
                 f"[FlopTracker{run_label}] Operazioni preprocessing/tokenizer: "
-                f"{self._preproc_ops} (totale aggregato: {self._total_operations:.0f})"
             )
 
         return self

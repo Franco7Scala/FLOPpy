@@ -120,8 +120,8 @@ def main():
 
     model = ComplexNet(num_classes=10)
     # Supporto opzionale DataParallel 
-    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
-        model = nn.DataParallel(model)
+    #if "cuda" in device:
+       # model = nn.DataParallel(model)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = nn.CrossEntropyLoss()
