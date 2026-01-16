@@ -21,6 +21,12 @@ class BaseBackend(ABC):
         """Rimuove gli hook"""
         ...
 
+    def add_extra_flop(self, flops: int) -> None:
+        """
+        Aggiunge FLOPs calcolati esternamente agli hook (es. loss, preprocessing).
+        """
+        return
+
     def get_total_flop(self) -> int:
         return int(self.total_flop)
 
