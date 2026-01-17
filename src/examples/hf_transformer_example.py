@@ -7,8 +7,9 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from datasets import load_dataset
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+
 from flop_tracker import FlopTracker
-from tokenizer_ops import TokenizerWithOps 
+from trainers import train_hf  
 
 
 def collate_fn(batch, tokenizer, max_length=128):
@@ -25,53 +26,98 @@ def collate_fn(batch, tokenizer, max_length=128):
     return enc
 
 
+def train_hf(*, model, dataloader, optimizer=None, device=None, epochs=1, observers=None):
+    """
+    Training esterno HF che notifica gli observer.
+    """
+    observers = observers or []
+
+    if device is not None:
+        model.to(device)
+
+    for obs in observers:
+        obs.on_train_start({"backend": "hf"})
+
+    for epoch in range(epochs):
+        for obs in observers:
+            obs.on_epoch_start(epoch)
+
+        for batch_idx, batch in enumerate(dataloader):
+            # batch context minimale
+            for obs in observers:
+                obs.on_batch_start(type("BC", (), {"epoch": epoch, "batch_idx": batch_idx, "batch_size": None}))
+
+            if device is not None:
+                batch = {k: (v.to(device) if hasattr(v, "to") else v) for k, v in batch.items()}
+
+            if optimizer is not None:
+                optimizer.zero_grad()
+
+            outputs = model(**batch)
+
+            for obs in observers:
+                obs.on_after_forward(type("BC", (), {"epoch": epoch, "batch_idx": batch_idx, "batch_size": None}), outputs)
+
+            loss = getattr(outputs, "loss", None)
+            if loss is not None and optimizer is not None:
+                # notify loss (passo come "loss_fn" un placeholder: la loss è già calcolata nel modello)
+                for obs in observers:
+                    obs.on_after_loss(type("BC", (), {"epoch": epoch, "batch_idx": batch_idx, "batch_size": None}), None, outputs, batch.get("labels"))
+
+                loss.backward()
+                for obs in observers:
+                    obs.on_after_backward(type("BC", (), {"epoch": epoch, "batch_idx": batch_idx, "batch_size": None}))
+
+                optimizer.step()
+                for obs in observers:
+                    obs.on_after_step(type("BC", (), {"epoch": epoch, "batch_idx": batch_idx, "batch_size": None}))
+
+            for obs in observers:
+                obs.on_batch_end(type("BC", (), {"epoch": epoch, "batch_idx": batch_idx, "batch_size": None}))
+
+        for obs in observers:
+            obs.on_epoch_end(epoch)
+
+    for obs in observers:
+        obs.on_train_end({"backend": "hf"})
+
+
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model_name = "distilbert-base-uncased"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
 
-    # tokenizer base HF
-    base_tokenizer = AutoTokenizer.from_pretrained(model_name)
-
-    # tokenizer wrappato che conta le operazioni (chars + tokens)
-    tracked_tokenizer = TokenizerWithOps(base_tokenizer, cost_model="chars+tokens")
-
-    model = AutoModelForSequenceClassification.from_pretrained(
-        model_name,
-        num_labels=2,
-    )
-
-    # Dataset (SST-2, 1% per esempio)
     ds = load_dataset("glue", "sst2", split="train[:1%]")
 
     loader = DataLoader(
         ds,
         batch_size=16,
         shuffle=True,
-        collate_fn=lambda batch: collate_fn(batch, tracked_tokenizer),
+        collate_fn=lambda batch: collate_fn(batch, tokenizer),
     )
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
 
-    # Istanzio il FlopTracker
-    ft = FlopTracker(run_name="hf_distilbert_sst2_with_tokenizer").hf_bind(
+    ft = FlopTracker(run_name="hf_distilbert_sst2_facade", print_summary=True).run(
         model=model,
-        export_path="hf_distilbert_flop_with_tokenizer.csv",
+        backend="hf",
+        train_fn=train_hf,
+        train_kwargs=dict(
+            model=model,
+            dataloader=loader,
+            optimizer=optimizer,
+            device=device,
+            epochs=1,
+        ),
+        log_per_batch=True,
+        log_per_epoch=True,
+        export_path="hf_distilbert_sst2_facade.csv",
         use_wandb=False,
     )
 
-    #tranier.train_model(model, epochs, batch_size, ...)
-
-    # FLOP del modello 
-    print("Raw FLOP (model):", ft.raw_flop)
-    print("Total FLOP (model):", ft.total_flop)
-
-    # Operazioni di tokenizzazione/preprocessing (conteggiate dal wrapper)
-    print("Tokenizer operations:", tracked_tokenizer.total_ops)
-
-    # FLOP modello + costo tokenizer
-    total_ops = ft.total_flop + tracked_tokenizer.total_ops
-    print("Total operations (model FLOPs + tokenizer ops):", total_ops)
+    print("REPORT:", ft.report)
 
 
 if __name__ == "__main__":
