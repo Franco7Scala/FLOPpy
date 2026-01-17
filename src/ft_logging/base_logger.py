@@ -1,5 +1,6 @@
 from __future__ import annotations
 from abc import ABC, abstractmethod
+from typing import Optional
 
 
 class BaseLogger(ABC):
@@ -8,7 +9,7 @@ class BaseLogger(ABC):
         self.log_per_epoch = log_per_epoch
 
     @abstractmethod
-    def log_batch(self, step: int, flop: int, cumulative_flop: int, epoch: int | None = None):
+    def log_batch(self, step: int, flop: int, cumulative_flop: int, epoch: Optional[int] = None):
         ...
 
     @abstractmethod
