@@ -106,14 +106,14 @@ class TorchBackend(BaseBackend):
                     nn.Embedding,
                     nn.EmbeddingBag,
 
-                    # --- Transformer high-level containers (FLOPs = 0 qui) ---
+                    # --- Transformer high-level containers (FLOP = 0 qui) ---
                     nn.Transformer,
                     nn.TransformerEncoder,
                     nn.TransformerDecoder,
                     nn.TransformerEncoderLayer,
                     nn.TransformerDecoderLayer,
 
-                    # --- DataParallel wrapper (FLOPs = 0 qui) ---
+                    # --- DataParallel wrapper (FLOP = 0 qui) ---
                     nn.DataParallel,
                 ),
             ):
@@ -140,14 +140,14 @@ class TorchBackend(BaseBackend):
         self._layer_handles.clear()
         self._root_handles.clear()
 
-    def add_extra_flop(self, flops: int) -> None:
+    def add_extra_flop(self, flop: int) -> None:
     """
-    Aggiunge FLOPs esterni (es. loss) al batch corrente.
+    Aggiunge FLOP esterni (es. loss) al batch corrente.
     Verranno sommati al totale a fine batch (_on_batch_end).
     """
-    if flops is None:
+    if flop is None:
         return
-    fl = int(flops)
+    fl = int(flop)
     if fl <= 0:
         return
     self._current_batch_flop += fl
