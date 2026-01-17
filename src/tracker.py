@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from contextlib import AbstractContextManager
 from typing import Any, Dict, Optional
 
@@ -22,11 +23,11 @@ class Tracker(AbstractContextManager, TrainingObserver):
         backend: str = "auto",
         log_per_batch: bool = False,
         log_per_epoch: bool = False,
-        export_path: str | None = None,
+        export_path: Optional[str] = None,
         use_wandb: bool = False,
-        wandb_project: str | None = None,
-        wandb_token: str | None = None,
-        run_name: str | None = None,
+        wandb_project: Optional[str] = None,
+        wandb_token: Optional[str] = None,
+        run_name: Optional[str] = None,
     ):
         self.logger = create_logger(
             log_per_batch=log_per_batch,
@@ -37,6 +38,7 @@ class Tracker(AbstractContextManager, TrainingObserver):
             wandb_token=wandb_token,
             run_name=run_name,
         )
+
         self.backend = create_backend(model, backend, logger=self.logger)
 
         # contatori extra (fuori dagli hook)
@@ -71,11 +73,6 @@ class Tracker(AbstractContextManager, TrainingObserver):
     def total_loss_flop(self) -> int:
         return int(self._loss_flop)
 
-    @property
-    def total_operations(self) -> float:
-        # aggregato (modello + tokenizer/preproc)
-        return float(self.total_flop + self.total_preproc_ops)
-
     # ---------------- API per preproc/tokenizer ---------------- #
 
     def add_preproc_ops(self, ops: int) -> None:
@@ -87,7 +84,7 @@ class Tracker(AbstractContextManager, TrainingObserver):
 
     # ---------------- Observer callbacks ---------------- #
 
-    def on_train_start(self, ctx: Dict[str, Any] | None = None) -> None:
+    def on_train_start(self, ctx: Optional[Dict[str, Any]] = None) -> None:
         return
 
     def on_epoch_start(self, epoch: int) -> None:
@@ -102,10 +99,10 @@ class Tracker(AbstractContextManager, TrainingObserver):
         return
 
     def on_after_loss(self, bc: BatchContext, loss: Any, outputs: Any, targets: Any) -> None:
-        # stima FLOP loss e aggiungi al batch corrente
-        loss_flop = self._estimate_loss_flop(loss, outputs, targets)
+      
+        loss_flop = self._estimate_loss_flop(loss=loss, outputs=outputs, targets=targets, extra=bc.extra)
         if loss_flop > 0:
-            self._loss_flop += int(loss_flop   )
+            self._loss_flop += int(loss_flop)
             if hasattr(self.backend, "add_extra_flop"):
                 self.backend.add_extra_flop(int(loss_flop))
 
@@ -127,51 +124,111 @@ class Tracker(AbstractContextManager, TrainingObserver):
                 cumulative_flop=self.total_flop,
             )
 
-    def on_train_end(self, ctx: Dict[str, Any] | None = None) -> None:
+    def on_train_end(self, ctx: Optional[Dict[str, Any]] = None) -> None:
         return
 
-    # ---------------- Stima Loss FLOP  ---------------- #
+    # ---------------- Stima Loss FLOP ---------------- #
 
-    def _estimate_loss_flop(self, loss_fn, preds, targets) -> int:
+    def _extract_preds(self, outputs: Any):
+        """Estrae logits/preds da output Torch o HF."""
+        try:
+            import torch
+        except Exception:
+            return None
+
+        if outputs is None:
+            return None
+
+        # HF ModelOutput: .logits
+        logits = getattr(outputs, "logits", None)
+        if isinstance(logits, torch.Tensor):
+            return logits
+
+        # torch: output tensor diretto
+        if isinstance(outputs, torch.Tensor):
+            return outputs
+
+        # tuple/list: primo tensor
+        if isinstance(outputs, (tuple, list)):
+            for o in outputs:
+                if isinstance(o, torch.Tensor):
+                    return o
+
+        return None
+
+    def _estimate_loss_flop(self, loss: Any, outputs: Any, targets: Any, extra: Optional[Dict[str, Any]]) -> int:
         """
-        Stima teorica dei FLOP della loss (forward).
-        Usa euristiche robuste; se non può stimare, restituisce 0.
+        Stima teorica FLOP della loss (solo forward), usando:
+        - extra["loss_type"] se presente (consigliato)
+        - altrimenti euristiche su preds/targets
+
+        loss_type supportati:
+          "cross_entropy", "mse", "l1", "bce", "bce_logits", "kl"
         """
         try:
             import torch
-            import torch.nn as nn
         except Exception:
             return 0
 
-        if loss_fn is None or preds is None or not hasattr(preds, "numel"):
+        preds = self._extract_preds(outputs)
+        if not isinstance(preds, torch.Tensor):
             return 0
 
-        N = int(preds.numel())
+        # 1) loss_type esplicito (opzionale)
+        loss_type = None
+        if extra and isinstance(extra, dict):
+            lt = extra.get("loss_type", None)
+            if isinstance(lt, str):
+                loss_type = lt.lower().strip()
 
-        if isinstance(loss_fn, nn.MSELoss):
+        # 2) euristiche se non specificato
+        if loss_type is None:
+            if isinstance(targets, torch.Tensor):
+                # Classification: targets int/long e preds ha classe dimension (.., C)
+                if targets.dtype in (torch.int64, torch.int32, torch.int16, torch.int8):
+                    if preds.dim() >= 2 and preds.shape[-1] > 1:
+                        loss_type = "cross_entropy"
+                # Regression-like: targets float e shape compatibile
+                if loss_type is None and targets.dtype.is_floating_point:
+                    if preds.shape == targets.shape:
+                        loss_type = "mse"
+
+        # 3) calcolo FLOP per tipo
+        if loss_type == "cross_entropy":
+            # preds: (B, C) o (B, T, C). targets: (B) o (B, T)
+            if preds.dim() == 2:
+                B, C = int(preds.shape[0]), int(preds.shape[1])
+                # stima: logsumexp ~ (exp C + sum + log) + subtract + gather
+                # -> circa (3C + 2) per sample + reduce (B-1)
+                return max(0, B * (3 * C + 2) + (B - 1))
+            if preds.dim() == 3:
+                B, T, C = int(preds.shape[0]), int(preds.shape[1]), int(preds.shape[2])
+                n = B * T
+                return max(0, n * (3 * C + 2) + (n - 1))
+            return 0
+
+        if loss_type == "mse":
+            # (pred-target)^2 -> sub + mul, poi riduce sum/mean
+            N = int(preds.numel())
             return max(0, 2 * N + (N - 1))
-        if isinstance(loss_fn, nn.L1Loss):
+
+        if loss_type == "l1":
+            # |pred-target| -> sub + abs, poi riduce
+            N = int(preds.numel())
             return max(0, 2 * N + (N - 1))
 
-        if isinstance(loss_fn, nn.NLLLoss):
-            B = int(preds.shape[0]) if hasattr(preds, "shape") and preds.dim() > 0 else 1
-            return max(0, B + (B - 1))
-
-        if isinstance(loss_fn, nn.CrossEntropyLoss):
-            B = int(preds.shape[0]) if hasattr(preds, "shape") and preds.dim() > 0 else 1
-            C = int(preds.shape[-1]) if hasattr(preds, "shape") and preds.dim() > 0 else 1
-            return max(0, B * (4 * C) + B + (B - 1))
-
-        if isinstance(loss_fn, nn.KLDivLoss):
-            return max(0, 3 * N + (N - 1))
-
-        if isinstance(loss_fn, nn.BCELoss):
+        if loss_type == "bce":
+            N = int(preds.numel())
+            # stima grezza: log + mul + add per elemento
             return max(0, 6 * N + (N - 1))
 
-        if isinstance(loss_fn, nn.BCEWithLogitsLoss):
+        if loss_type in ("bce_logits", "bcewithlogits"):
+            N = int(preds.numel())
+            # sigmoid + bce
             return max(0, 10 * N + (N - 1))
 
-        if isinstance(loss_fn, (nn.TripletMarginLoss, nn.TripletMarginWithDistanceLoss)):
-            return max(0, 5 * N)
+        if loss_type == "kl":
+            N = int(preds.numel())
+            return max(0, 3 * N + (N - 1))
 
         return 0
