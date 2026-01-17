@@ -5,11 +5,11 @@ from typing import Any, Callable, Dict, Optional
 
 
 @dataclass
-class FlopsReport:
+class FlopReport:
     run_name: Optional[str]
     backend: str
-    model_flops: int
-    loss_flops: int
+    model_flop: int
+    loss_flop: int
     preproc_ops: int
     total_operations: float
     export_path: Optional[str]
@@ -31,10 +31,10 @@ class FlopTracker:
         self.print_summary = print_summary
         self.print_hardware = print_hardware
 
-        self._report: Optional[FlopsReport] = None
+        self._report: Optional[FlopReport] = None
 
     @property
-    def report(self) -> FlopsReport:
+    def report(self) -> FlopReport:
         if self._report is None:
             raise RuntimeError("Nessun report disponibile: esegui prima FlopTracker.run(...).")
         return self._report
@@ -96,11 +96,11 @@ class FlopTracker:
             train_fn(**train_kwargs, observers=[tr])
 
             # costruzione report
-            self._report = FlopsReport(
+            self._report = FlopReport(
                 run_name=self.run_name,
                 backend=backend,
-                model_flops=int(tr.total_flop),
-                loss_flops=int(getattr(tr, "total_loss_flop", 0)),
+                model_flop=int(tr.total_flop),
+                loss_flop=int(getattr(tr, "total_loss_flop", 0)),
                 preproc_ops=int(getattr(tr, "total_preproc_ops", 0)),
                 total_operations=float(getattr(tr, "total_operations", tr.total_flop)),
                 export_path=export_path,
@@ -124,9 +124,9 @@ class FlopTracker:
         if rep.extra.get("hardware") is not None:
             print(f"[FlopTracker{run_label}] Hardware: {rep.extra['hardware']}")
 
-        print(f"[FlopTracker{run_label}] FLOPs modello: {rep.model_flops}")
-        if rep.loss_flops > 0:
-            print(f"[FlopTracker{run_label}] FLOPs loss (forward): {rep.loss_flops}")
+        print(f"[FlopTracker{run_label}] FLOP modello: {rep.model_flop}")
+        if rep.loss_flop > 0:
+            print(f"[FlopTracker{run_label}] FLOP loss (forward): {rep.loss_flop}")
         if rep.preproc_ops > 0:
             print(f"[FlopTracker{run_label}] Ops preprocessing/tokenizer: {rep.preproc_ops}")
 
