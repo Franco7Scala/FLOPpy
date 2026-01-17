@@ -11,7 +11,7 @@ class Tracker(AbstractContextManager, TrainingObserver):
     """
     Tracker Observer:
     - Instanzia backend e logger
-    - Aggancia hook FLOPs modello
+    - Aggancia hook FLOP modello
     - Osserva eventi del training per includere costi extra (loss, tokenizer, ecc.)
     - Espone metriche finali
     """
@@ -102,12 +102,12 @@ class Tracker(AbstractContextManager, TrainingObserver):
         return
 
     def on_after_loss(self, bc: BatchContext, loss: Any, outputs: Any, targets: Any) -> None:
-        # stima FLOPs loss e aggiungi al batch corrente
-        loss_flops = self._estimate_loss_flop(loss, outputs, targets)
-        if loss_flops > 0:
-            self._loss_flop += int(loss_flops)
+        # stima FLOP loss e aggiungi al batch corrente
+        loss_flop = self._estimate_loss_flop(loss, outputs, targets)
+        if loss_flop > 0:
+            self._loss_flop += int(loss_flop   )
             if hasattr(self.backend, "add_extra_flop"):
-                self.backend.add_extra_flop(int(loss_flops))
+                self.backend.add_extra_flop(int(loss_flop))
 
     def on_after_backward(self, bc: BatchContext) -> None:
         return
@@ -130,11 +130,11 @@ class Tracker(AbstractContextManager, TrainingObserver):
     def on_train_end(self, ctx: Dict[str, Any] | None = None) -> None:
         return
 
-    # ---------------- Loss FLOPs (stima) ---------------- #
+    # ---------------- Stima Loss FLOP  ---------------- #
 
     def _estimate_loss_flop(self, loss_fn, preds, targets) -> int:
         """
-        Stima teorica dei FLOPs della loss (forward).
+        Stima teorica dei FLOP della loss (forward).
         Usa euristiche robuste; se non può stimare, restituisce 0.
         """
         try:
