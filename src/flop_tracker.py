@@ -1,88 +1,83 @@
 from __future__ import annotations
 
-from typing import Optional, Any
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional
 
-from tracker import Tracker
+
+@dataclass
+class FlopsReport:
+    run_name: Optional[str]
+    backend: str
+    model_flops: int
+    loss_flops: int
+    preproc_ops: int
+    total_operations: float
+    export_path: Optional[str]
+    use_wandb: bool
+    wandb_project: Optional[str]
+    extra: Dict[str, Any]
 
 
 class FlopTracker:
     """
-    Entry point pubblico della libreria.
-
-    Uso:
-        ft = FlopTracker(run_name="dp_cnn").torch_bind(
-            model=model,
-            optimizer=optimizer,
-            loss_fn=loss_fn,
-            train_loader=train_loader,
-            device=device,
-            epochs=10,
-            log_per_batch=True,
-            export_path="flop.csv",
-            use_wandb=False,
-        )
+    sfrutto il Design Pattern Facade
+    - Nasconde la complessità di Tracker + backend + logger + training algorithm
+    - Espone un'unica API di alto livello: run(...)
+    - Il training rimane esterno e viene passato come funzione (Strategy-like)
     """
 
-    def __init__(self, run_name: Optional[str] = None):
+    def __init__(self, run_name: Optional[str] = None, *, print_summary: bool = True, print_hardware: bool = False):
         self.run_name = run_name
-        # FLOP del modello
-        self._raw_flop: int = 0
-        self._total_flop: float = 0.0
-        # operazioni di preprocessing/tokenizer
-        self._preproc_ops: int = 0
+        self.print_summary = print_summary
+        self.print_hardware = print_hardware
 
-        self._history: dict[str, Any] = {}
-
-    # -------------------- PROPRIETÀ DI LETTURA -------------------- #
+        self._report: Optional[FlopsReport] = None
 
     @property
-    def raw_flop(self) -> int:
-        """FLOP (somma dei layer del modello, senza preprocessing)."""
-        return self._raw_flop
+    def report(self) -> FlopsReport:
+        if self._report is None:
+            raise RuntimeError("Nessun report disponibile: esegui prima FlopTracker.run(...).")
+        return self._report
 
-    @property
-    def total_flop(self) -> float:
-        """FLOP totali del modello"""
-        return self._total_flop
-
-    @property
-    def total_preproc_ops(self) -> int:
-        """
-        Operazioni totali di preprocessing/tokenizer registrate dal Tracker.
-        """
-        return self._preproc_ops
-
-    @property
-    def history(self) -> dict[str, Any]:
-        return self._history
-
-    # -------------------- TORCH BIND -------------------- #
-
-    def torch_bind(
+    def run(
         self,
-        model,
-        optimizer,
-        loss_fn,
-        train_loader,
-        device: Optional[str] = None,
         *,
-        epochs: int = 1,
+        model,
+        train_fn: Callable[..., None],
+        train_kwargs: Dict[str, Any],
         backend: str = "torch",
+        # logging
         log_per_batch: bool = False,
         log_per_epoch: bool = False,
         export_path: Optional[str] = None,
+        # wandb
         use_wandb: bool = False,
         wandb_project: Optional[str] = None,
         wandb_token: Optional[str] = None,
+        # extra
+        extra_ctx: Optional[Dict[str, Any]] = None,
     ) -> "FlopTracker":
         """
-        Esegue training + tracking FLOP per un modello PyTorch.
-        Questa funzione incapsula loop per batch/epoch e stampa i FLOP totali
-        (totalmente trasparente per l'utente).
-        """
+        Esegue una run osservata dal Tracker.
 
-        if device is not None:
-            model.to(device)
+        Parametri chiave:
+        - train_fn: funzione di training esterna (es. trainers.train_torch)
+        - train_kwargs: parametri specifici dell'algoritmo di training (optimizer, loss_fn, loader, ecc.)
+
+        Il Tracker osserva tramite callbacks.
+        """
+        from tracker import Tracker  # import locale per evitare problemi di packaging
+
+        extra_ctx = extra_ctx or {}
+
+        # (opzionale) hardware info stile codecarbon
+        hw = None
+        if self.print_hardware:
+            try:
+                from hardware_info import get_hardware_info
+                hw = get_hardware_info()
+            except Exception:
+                hw = None
 
         with Tracker(
             model=model,
@@ -96,238 +91,47 @@ class FlopTracker:
             run_name=self.run_name,
         ) as tr:
 
-            for epoch in range(epochs):
-                if hasattr(tr.backend, "set_epoch"):
-                    tr.backend.set_epoch(epoch)
+            # Esecuzione del training esterno (il Tracker è un observer)
+            # Convenzione: train_fn deve accettare observers=[...]
+            train_fn(**train_kwargs, observers=[tr])
 
-                for xb, yb in train_loader:
-                    if device is not None:
-                        xb, yb = xb.to(device), yb.to(device)
-
-                    optimizer.zero_grad()
-                    output = model(xb)
-
-                    if loss_fn is not None:
-                        loss = loss_fn(output, yb)
-                        loss.backward()
-                        optimizer.step()
-
-                # log per epoch (se abilitato)
-                if tr.logger is not None and hasattr(tr.logger, "log_epoch"):
-                    tr.logger.log_epoch(
-                        epoch=epoch,
-                        flop=tr.total_flop,
-                        cumulative_flop=tr.total_flop,
-                    )
-
-            # metriche dal Tracker
-            self._raw_flop = tr.total_flop
-            self._total_flop = float(tr.total_flop)
-            self._preproc_ops = tr.total_preproc_ops
-
-            self._history["backend"] = backend
-            self._history["export_path"] = export_path
-            self._history["use_wandb"] = use_wandb
-            self._history["wandb_project"] = wandb_project
-            self._history["epochs"] = epochs
-
-        # STAMPA AUTOMATICA DEI FLOP TOTALI
-        run_label = f"[{self.run_name}]" if self.run_name is not None else ""
-        print(
-            f"[FlopTracker{run_label}] FLOP totali (modello): {self._total_flop:.0f} "
-            f"(raw: {self._raw_flop})"
-        )
-        if self._preproc_ops > 0:
-            print(
-                f"[FlopTracker{run_label}] Operazioni preprocessing/tokenizer: "
+            # costruzione report
+            self._report = FlopsReport(
+                run_name=self.run_name,
+                backend=backend,
+                model_flops=int(tr.total_flop),
+                loss_flops=int(getattr(tr, "total_loss_flop", 0)),
+                preproc_ops=int(getattr(tr, "total_preproc_ops", 0)),
+                total_operations=float(getattr(tr, "total_operations", tr.total_flop)),
+                export_path=export_path,
+                use_wandb=use_wandb,
+                wandb_project=wandb_project,
+                extra={
+                    **extra_ctx,
+                    "hardware": hw,
+                },
             )
+
+        if self.print_summary:
+            self._print_summary()
 
         return self
 
-    # -------------------- HF BIND -------------------- #
+    def _print_summary(self) -> None:
+        rep = self.report
+        run_label = f"[{rep.run_name}]" if rep.run_name else ""
 
-    def hf_bind(
-        self,
-        model,
-        dataloader,
-        optimizer=None,
-        device: Optional[str] = None,
-        *,
-        epochs: int = 1,
-        backend: str = "hf",
-        log_per_batch: bool = False,
-        log_per_epoch: bool = False,
-        export_path: Optional[str] = None,
-        use_wandb: bool = False,
-        wandb_project: Optional[str] = None,
-        wandb_token: Optional[str] = None,
-    ) -> "FlopTracker":
-        """
-        Esegue training / inferenza per un modello HuggingFace (transformers),
-        stimando i FLOP del modello (e se abilitato il wrapper, le operazioni di tokenizer).
+        if rep.extra.get("hardware") is not None:
+            print(f"[FlopTracker{run_label}] Hardware: {rep.extra['hardware']}")
 
-        Assunzioni:
-        - dataloader restituisce dict con chiavi tipo:
-          "input_ids", "attention_mask", "labels", ecc.
-        - se il model restituisce un oggetto con attributo .loss
-          e optimizer non è None, facciamo training:
-            loss = output.loss; loss.backward(); optimizer.step().
-        - se optimizer è None, facciamo solo forward (inferenza).
-        """
+        print(f"[FlopTracker{run_label}] FLOPs modello: {rep.model_flops}")
+        if rep.loss_flops > 0:
+            print(f"[FlopTracker{run_label}] FLOPs loss (forward): {rep.loss_flops}")
+        if rep.preproc_ops > 0:
+            print(f"[FlopTracker{run_label}] Ops preprocessing/tokenizer: {rep.preproc_ops}")
 
-        if device is not None:
-            model.to(device)
-
-        with Tracker(
-            model=model,
-            backend=backend,
-            log_per_batch=log_per_batch,
-            log_per_epoch=log_per_epoch,
-            export_path=export_path,
-            use_wandb=use_wandb,
-            wandb_project=wandb_project,
-            wandb_token=wandb_token,
-            run_name=self.run_name,
-        ) as tr:
-
-            for epoch in range(epochs):
-                if hasattr(tr.backend, "set_epoch"):
-                    tr.backend.set_epoch(epoch)
-
-                for batch in dataloader:
-                    # spostiamo tutti i tensori su device
-                    if device is not None:
-                        batch = {
-                            k: (v.to(device) if hasattr(v, "to") else v)
-                            for k, v in batch.items()
-                        }
-
-                    if optimizer is not None:
-                        optimizer.zero_grad()
-
-                    output = model(**batch)
-
-                    # se l'output ha 'loss' e c’è un optimizer, facciamo training
-                    loss = getattr(output, "loss", None)
-                    if loss is not None and optimizer is not None:
-                        loss.backward()
-                        optimizer.step()
-
-                # log per epoch HF (se richiesto)
-                if tr.logger is not None and hasattr(tr.logger, "log_epoch"):
-                    tr.logger.log_epoch(
-                        epoch=epoch,
-                        flop=tr.total_flop,
-                        cumulative_flop=tr.total_flop,
-                    )
-
-            self._raw_flop = tr.total_flop
-            self._total_flop = float(tr.total_flop)
-            self._preproc_ops = tr.total_preproc_ops
-
-            self._history["backend"] = backend
-            self._history["export_path"] = export_path
-            self._history["use_wandb"] = use_wandb
-            self._history["wandb_project"] = wandb_project
-            self._history["epochs"] = epochs
-            self._history["hf_mode"] = "train" if optimizer is not None else "inference"
-
-        run_label = f"[{self.run_name}]" if self.run_name is not None else ""
-        mode_label = "train" if optimizer is not None else "inference"
-        print(
-            f"[FlopTracker{run_label}] FLOP totali (HF, mode={mode_label}): "
-            f"{self._total_flop:.0f} (raw: {self._raw_flop})"
-        )
-        if self._preproc_ops > 0:
-            print(
-                f"[FlopTracker{run_label}] Operazioni preprocessing/tokenizer: "
-            )
-
-        return self
-
-    # -------------------- SKLEARN BIND -------------------- #
-
-    def sklearn_bind(
-        self,
-        model,
-        X,
-        y=None,
-        *,
-        mode: str = "fit",  # "fit", "predict" o "fit_predict"
-        backend: str = "sklearn",
-        log_per_call: bool = True,
-        export_path: Optional[str] = None,
-        use_wandb: bool = False,
-        wandb_project: Optional[str] = None,
-        wandb_token: Optional[str] = None,
-    ) -> "FlopTracker":
-        """
-        Esegue fit/predict per un modello sklearn e traccia i FLOP.
-
-        Esempi:
-            ft = FlopTracker(run_name="lr").sklearn_bind(
-                model=clf,
-                X=X_train,
-                y=y_train,
-                mode="fit",
-                log_per_call=True,
-                export_path="flop_lr.csv",
-            )
-
-            ft = FlopTracker(run_name="knn").sklearn_bind(
-                model=knn,
-                X=X_test,
-                mode="predict",
-            )
-
-        Ogni chiamata a fit/predict viene trattata come un "batch"
-        nei log del backend sklearn.
-        """
-
-        log_per_batch = log_per_call
-        log_per_epoch = False
-
-        with Tracker(
-            model=model,
-            backend=backend,
-            log_per_batch=log_per_batch,
-            log_per_epoch=log_per_epoch,
-            export_path=export_path,
-            use_wandb=use_wandb,
-            wandb_project=wandb_project,
-            wandb_token=wandb_token,
-            run_name=self.run_name,
-        ) as tr:
-
-            # eseguiamo fit/predict secondo la modalità scelta
-            if mode == "fit":
-                model.fit(X, y)
-            elif mode == "predict":
-                _ = model.predict(X)
-            elif mode == "fit_predict":
-                model.fit(X, y)
-                _ = model.predict(X)
-            else:
-                raise ValueError(f"Modo sklearn_bind non supportato: {mode}")
-
-            self._raw_flop = tr.total_flop
-            self._total_flop = float(self._raw_flop)
-            self._preproc_ops = tr.total_preproc_ops
-
-            self._history["backend"] = backend
-            self._history["export_path"] = export_path
-            self._history["use_wandb"] = use_wandb
-            self._history["wandb_project"] = wandb_project
-            self._history["mode"] = mode
-
-        run_label = f"[{self.run_name}]" if self.run_name is not None else ""
-        print(
-            f"[FlopTracker{run_label}] FLOP totali (sklearn, mode={mode}): "
-            f"{self._total_flop:.0f} (raw: {self._raw_flop})"
-        )
-        if self._preproc_ops > 0:
-            print(
-                f"[FlopTracker{run_label}] Operazioni preprocessing/tokenizer: "
-            )
-
-        return self
+        print(f"[FlopTracker{run_label}] Totale operazioni (model + preproc): {rep.total_operations:.0f}")
+        if rep.export_path:
+            print(f"[FlopTracker{run_label}] Export CSV: {rep.export_path}")
+        if rep.use_wandb and rep.wandb_project:
+            print(f"[FlopTracker{run_label}] W&B project: {rep.wandb_project}")
