@@ -8,20 +8,24 @@ from typing import Any, Callable, Dict, Optional
 class FlopReport:
     run_name: Optional[str]
     backend: str
+
     model_flop: int
+
+    # breakdown esplicito
     loss_flop: int
     preproc_ops: int
-    total_operations: float
+
+    # logging / integrazioni
     export_path: Optional[str]
     use_wandb: bool
     wandb_project: Optional[str]
+
     extra: Dict[str, Any]
 
 
 class FlopTracker:
     """
-    sfrutto il Design Pattern Facade
-    - Nasconde la complessità di Tracker + backend + logger + training algorithm
+    - Nasconde complessità di Tracker + backend + logger + training algorithm
     - Espone un'unica API di alto livello: run(...)
     - Il training rimane esterno e viene passato come funzione (Strategy-like)
     """
@@ -30,7 +34,6 @@ class FlopTracker:
         self.run_name = run_name
         self.print_summary = print_summary
         self.print_hardware = print_hardware
-
         self._report: Optional[FlopReport] = None
 
     @property
@@ -61,10 +64,9 @@ class FlopTracker:
         Esegue una run osservata dal Tracker.
 
         Parametri chiave:
-        - train_fn: funzione di training esterna (es. trainers.train_torch)
-        - train_kwargs: parametri specifici dell'algoritmo di training (optimizer, loss_fn, loader, ecc.)
-
-        Il Tracker osserva tramite callbacks.
+        - train_fn: funzione di training esterna (es. trainers.train_torch / train_hf / train_sklearn)
+        - train_kwargs: parametri specifici dell'algoritmo (optimizer, loss_fn, loader, ecc.)
+        - train_fn deve accettare observers=[...]
         """
         from tracker import Tracker  # import locale per evitare problemi di packaging
 
@@ -91,25 +93,23 @@ class FlopTracker:
             run_name=self.run_name,
         ) as tr:
 
-            # Esecuzione del training esterno (il Tracker è un observer)
-            # Convenzione: train_fn deve accettare observers=[...]
+            # Training esterno 
             train_fn(**train_kwargs, observers=[tr])
 
-            # costruzione report
+            model_flop = int(tr.total_flop)
+            loss_flop = int(getattr(tr, "total_loss_flop", 0))
+            preproc_ops = int(getattr(tr, "total_preproc_ops", 0))
+
             self._report = FlopReport(
                 run_name=self.run_name,
                 backend=backend,
-                model_flop=int(tr.total_flop),
-                loss_flop=int(getattr(tr, "total_loss_flop", 0)),
-                preproc_ops=int(getattr(tr, "total_preproc_ops", 0)),
-                total_operations=float(getattr(tr, "total_operations", tr.total_flop)),
+                model_flop=model_flop,
+                loss_flop=loss_flop,
+                preproc_ops=preproc_ops,
                 export_path=export_path,
                 use_wandb=use_wandb,
                 wandb_project=wandb_project,
-                extra={
-                    **extra_ctx,
-                    "hardware": hw,
-                },
+                extra={**extra_ctx, "hardware": hw},
             )
 
         if self.print_summary:
@@ -124,13 +124,15 @@ class FlopTracker:
         if rep.extra.get("hardware") is not None:
             print(f"[FlopTracker{run_label}] Hardware: {rep.extra['hardware']}")
 
-        print(f"[FlopTracker{run_label}] FLOP modello: {rep.model_flop}")
+        # Questo è il totale FLOP del modello 
+        print(f"[FlopTracker{run_label}] FLOP modello (incl. extra): {rep.model_flop}")
+
+        # Breakdown esplicito
         if rep.loss_flop > 0:
             print(f"[FlopTracker{run_label}] FLOP loss (forward): {rep.loss_flop}")
         if rep.preproc_ops > 0:
             print(f"[FlopTracker{run_label}] Ops preprocessing/tokenizer: {rep.preproc_ops}")
 
-        print(f"[FlopTracker{run_label}] Totale operazioni (model + preproc): {rep.total_operations:.0f}")
         if rep.export_path:
             print(f"[FlopTracker{run_label}] Export CSV: {rep.export_path}")
         if rep.use_wandb and rep.wandb_project:
