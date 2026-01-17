@@ -10,7 +10,7 @@ from .base import BaseBackend
 class SklearnBackend(BaseBackend):
     """
     Backend per modelli scikit-learn.
-    - Ogni chiamata conta i FLOPs in base al tipo di modello + shape di X.
+    - Ogni chiamata conta i FLOP in base al tipo di modello + shape di X.
     - Ogni chiamata viene trattata come un "batch" nei log.
     - Supporta FLOP extra (loss/preproc) via add_extra_flop().
     """
@@ -56,13 +56,13 @@ class SklearnBackend(BaseBackend):
 
     # ---------------- EXTRA FLOP ---------------- #
 
-    def add_extra_flop(self, flops: int) -> None:
+    def add_extra_flop(self, flop: int) -> None:
         """
         Aggiunge FLOP esterni (loss/preproc) alla prossima call (fit/predict/transform).
         """
-        if flops is None:
+        if flop is None:
             return
-        v = int(flops)
+        v = int(flop)
         if v > 0:
             self._pending_extra_flop += v
 
