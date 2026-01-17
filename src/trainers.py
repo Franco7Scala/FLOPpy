@@ -97,7 +97,7 @@ def train_hf(
     - dataloader produce dict (input_ids, attention_mask, labels, ...)
     - se optimizer è None -> solo forward (inference)
     - se outputs.loss esiste e optimizer non è None -> backward + step
-    - opzionale: notifica loss FLOPs stimando CrossEntropy se loss_kind lo consente
+    - opzionale: notifica loss FLOP stimando CrossEntropy se loss_kind lo consente
     """
     observers = observers or []
 
@@ -200,7 +200,7 @@ def train_hf_generative(
     Trainer per CausalLM (es. GPT2, LLaMA...)
     - se manca labels e create_labels_if_missing=True: labels = input_ids.clone()
     - se outputs.loss e optimizer: backward+step
-    - opzionale: notifica FLOPs loss (CrossEntropy) se loss_kind="cross_entropy"
+    - opzionale: notifica FLOP loss (CrossEntropy) se loss_kind="cross_entropy"
     """
     observers = observers or []
 
