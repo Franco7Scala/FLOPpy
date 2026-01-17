@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import numpy as np
 
@@ -10,16 +10,20 @@ from .base import BaseBackend
 class SklearnBackend(BaseBackend):
     """
     Backend per modelli scikit-learn.
-    - Ogni chiamata conta i FLOP in base al tipo di modello + shape di X.
+    - Ogni chiamata conta i FLOPs in base al tipo di modello + shape di X.
     - Ogni chiamata viene trattata come un "batch" nei log.
+    - Supporta FLOP extra (loss/preproc) via add_extra_flop().
     """
 
     def __init__(self, model, logger=None):
         super().__init__(model, logger=logger)
-        self._orig_fit: Callable | None = None
-        self._orig_predict: Callable | None = None
-        self._orig_predict_proba: Callable | None = None
-        self._orig_transform: Callable | None = None
+        self._orig_fit: Optional[Callable] = None
+        self._orig_predict: Optional[Callable] = None
+        self._orig_predict_proba: Optional[Callable] = None
+        self._orig_transform: Optional[Callable] = None
+
+        # FLOP esterni da accumulare nella prossima call
+        self._pending_extra_flop: int = 0
 
     # ---------------- START / STOP ---------------- #
 
@@ -34,7 +38,7 @@ class SklearnBackend(BaseBackend):
 
         if hasattr(self.model, "predict_proba"):
             self._orig_predict_proba = self.model.predict_proba
-            self.model.predict_proba = self._wrap_predict(self.model.predict_proba)
+            self.model.predict_proba = self._wrap_predict_proba(self.model.predict_proba)
 
         if hasattr(self.model, "transform"):
             self._orig_transform = self.model.transform
@@ -50,13 +54,30 @@ class SklearnBackend(BaseBackend):
         if self._orig_transform is not None:
             self.model.transform = self._orig_transform
 
+    # ---------------- EXTRA FLOP ---------------- #
+
+    def add_extra_flop(self, flops: int) -> None:
+        """
+        Aggiunge FLOP esterni (loss/preproc) alla prossima call (fit/predict/transform).
+        """
+        if flops is None:
+            return
+        v = int(flops)
+        if v > 0:
+            self._pending_extra_flop += v
+
+    def _consume_extra(self) -> int:
+        v = int(self._pending_extra_flop)
+        self._pending_extra_flop = 0
+        return v
+
     # ---------------- WRAPPER METODI ---------------- #
 
     def _wrap_fit(self, fn: Callable) -> Callable:
         def wrapped(X, y=None, *args, **kwargs):
             result = fn(X, y, *args, **kwargs)
-            # stimiamo i FLOP di training
             flop = self._estimate_fit_flop(np.asarray(X), y)
+            flop += self._consume_extra()
             self._accumulate_call(flop)
             return result
 
@@ -65,10 +86,23 @@ class SklearnBackend(BaseBackend):
     def _wrap_predict(self, fn: Callable) -> Callable:
         def wrapped(X, *args, **kwargs):
             X_arr = np.asarray(X)
-            y = fn(X, *args, **kwargs)
-            flop = self._estimate_predict_flop(X_arr, np.asarray(y))
+            y_pred = fn(X, *args, **kwargs)
+            flop = self._estimate_predict_flop(X_arr, np.asarray(y_pred))
+            flop += self._consume_extra()
             self._accumulate_call(flop)
-            return y
+            return y_pred
+
+        return wrapped
+
+    def _wrap_predict_proba(self, fn: Callable) -> Callable:
+        def wrapped(X, *args, **kwargs):
+            X_arr = np.asarray(X)
+            proba = fn(X, *args, **kwargs)
+            # per semplicità uso la stessa stima di predict 
+            flop = self._estimate_predict_flop(X_arr, np.asarray(proba))
+            flop += self._consume_extra()
+            self._accumulate_call(flop)
+            return proba
 
         return wrapped
 
@@ -77,6 +111,7 @@ class SklearnBackend(BaseBackend):
             X_arr = np.asarray(X)
             Z = fn(X, *args, **kwargs)
             flop = self._estimate_transform_flop(X_arr, np.asarray(Z))
+            flop += self._consume_extra()
             self._accumulate_call(flop)
             return Z
 
@@ -89,7 +124,7 @@ class SklearnBackend(BaseBackend):
         self.total_flop += int(flop)
         self._batch_idx += 1
 
-        if self.logger is not None and hasattr(self.logger, "log_batch"):
+        if self.logger is not None and hasattr(self.logger, "log_batch") and getattr(self.logger, "log_per_batch", True):
             self.logger.log_batch(
                 step=self._batch_idx,
                 flop=self._last_batch_flop,
@@ -97,20 +132,12 @@ class SklearnBackend(BaseBackend):
                 epoch=self._epoch_idx,
             )
 
-    # ---------------- STIME FLOP ---------------- #
+    # ---------------- STIME FLOPs ---------------- #
 
     def _estimate_fit_flop(self, X: np.ndarray, y: Any) -> int:
-        """
-        Per ora teniamo fit() come 0 FLOP (o molto grezzo).
-        Eventualmente puoi estendere con formule specifiche per algoritmo.
-        """
         return 0
 
     def _estimate_predict_flop(self, X: np.ndarray, y: np.ndarray) -> int:
-        """
-        Stima dei FLOP per una chiamata a predict(X).
-        Alcune stime sono molto approssimate ma sufficienti per confronto.
-        """
         try:
             from sklearn.linear_model import LinearRegression, Ridge, Lasso, LogisticRegression
             from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
@@ -122,28 +149,22 @@ class SklearnBackend(BaseBackend):
 
         m = self.model
 
-        # ------- Regressione / classificazione lineare ------- #
+        # Lineari / logreg: XW + b
         if isinstance(m, (LinearRegression, Ridge, Lasso, LogisticRegression)):
-            # y = XW^T + b 
             flop = 2 * n_features * n_outputs * n_samples
             return int(flop)
 
-        # ------- KNN ------- #
+        # KNN brute force: distanze vs training
         if isinstance(m, (KNeighborsClassifier, KNeighborsRegressor)):
-            # brute force: distanza vs tutti i punti di training:
-            # ~ 2 * n_train * n_features * n_test
             n_train = getattr(m, "n_samples_fit_", None)
             if n_train is None and hasattr(m, "_fit_X"):
                 n_train = m._fit_X.shape[0]
             if n_train is None:
                 return 0
-            flop = 2 * n_train * n_features * n_samples
+            flop = 2 * int(n_train) * n_features * n_samples
             return int(flop)
+
         return 0
 
     def _estimate_transform_flop(self, X: np.ndarray, Z: np.ndarray) -> int:
-        """
-        Per trasformatori sklearn (StandardScaler, PCA, ecc.).
-        Per ora lo lasciamo a 0, ma puoi estenderlo facilmente.
-        """
         return 0
