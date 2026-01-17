@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from typing import Any, Callable, Optional
@@ -132,7 +133,7 @@ class SklearnBackend(BaseBackend):
                 epoch=self._epoch_idx,
             )
 
-    # ---------------- STIME FLOPs ---------------- #
+    # ---------------- STIME FLOP ---------------- #
 
     def _estimate_fit_flop(self, X: np.ndarray, y: Any) -> int:
         return 0
