@@ -11,7 +11,7 @@ class TokenizerWithOps:
     delle operazioni di tokenizzazione e lo accumula in un contatore interno.
 
     Obiettivo:
-        - Non calcola FLOPs, ma conta una metrica di "costo" del tokenizer.
+        - Non calcola FLOP, ma conta una metrica di "costo" del tokenizer.
         - Il modello di costo predefinito è:
               ops = numero di caratteri + numero di token generati
 
