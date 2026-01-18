@@ -10,9 +10,6 @@ from observers import TrainingObserver, BatchContext
 # ------------------------------------------------------------
 
 def train_torch(
-  
-   import torch
-   
     *,
     model,
     optimizer,
@@ -22,6 +19,12 @@ def train_torch(
     epochs: int = 1,
     observers: Optional[List[TrainingObserver]] = None,
 ) -> None:
+    """
+    Trainer PyTorch (training esterno).
+    Import di torch LAZY: sklearn può funzionare senza torch installato.
+    """
+    import torch  
+
     observers = observers or []
 
     if device is not None:
