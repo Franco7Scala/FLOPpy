@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-import torch
-
 from observers import TrainingObserver, BatchContext
 
 
@@ -12,6 +10,9 @@ from observers import TrainingObserver, BatchContext
 # ------------------------------------------------------------
 
 def train_torch(
+  
+   import torch
+   
     *,
     model,
     optimizer,
