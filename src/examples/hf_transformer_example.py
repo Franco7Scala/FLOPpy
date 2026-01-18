@@ -17,8 +17,7 @@ try:
 except Exception:
     TokenizerWithOps = None
 
-
-def collate_fn(batch, tokenizer, max_length=128, tracker=None):
+def collate_fn(batch, tokenizer, max_length=128):
     texts = [ex["sentence"] for ex in batch]
     labels = [ex["label"] for ex in batch]
 
@@ -27,8 +26,14 @@ def collate_fn(batch, tokenizer, max_length=128, tracker=None):
         padding=True,
         truncation=True,
         max_length=max_length,
-        return_tensors="pt",
+        return_tensors="pt",   
     )
+
+    enc["labels"] = torch.tensor(labels, dtype=torch.long)
+
+    return {k: v for k, v in enc.items()}
+
+   
 
     if tracker is not None and hasattr(tokenizer, "last_ops"):
         try:
@@ -57,7 +62,7 @@ def main():
     def _collate(batch):
         return collate_fn(batch, tokenizer, tracker=tracker_holder["tr"])
 
-    loader = DataLoader(ds, batch_size=16, shuffle=True, collate_fn=_collate)
+    loader = DataLoader(ds, batch_size=16, shuffle=True, collate_fn=lambda batch: collate_fn(batch, tokenizer))
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
 
