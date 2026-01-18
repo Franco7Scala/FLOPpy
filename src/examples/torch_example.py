@@ -120,7 +120,7 @@ def main():
                 for obs in observers:
                     obs.on_after_forward(bc, outputs)
 
-                loss = loss_fn(outputs, yb
+                loss = loss_fn(outputs, yb)
                 for obs in observers:
                     obs.on_after_loss(bc, loss, outputs, yb)
 
