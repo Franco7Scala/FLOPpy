@@ -23,7 +23,7 @@ def train_torch(
     Trainer PyTorch (training esterno).
     Import di torch LAZY: sklearn può funzionare senza torch installato.
     """
-    import torch  
+    import torch  # lazy import
 
     observers = observers or []
 
@@ -84,6 +84,40 @@ def train_torch(
 # HF TRAINER (classification / seq2seq / generic)
 # ------------------------------------------------------------
 
+def _normalize_hf_batch(batch: Any) -> Any:
+    """
+    Normalizza i batch HF in modo robusto:
+    - se batch è BatchEncoding -> dict(batch)
+    - se batch è dict con liste/tuple -> torch.tensor(...)
+    """
+    try:
+        import torch
+    except Exception:
+        torch = None
+
+    # BatchEncoding -> dict
+    try:
+        from transformers.tokenization_utils_base import BatchEncoding
+    except Exception:
+        BatchEncoding = None
+
+    if BatchEncoding is not None and isinstance(batch, BatchEncoding):
+        batch = dict(batch)
+
+    if isinstance(batch, dict) and torch is not None:
+        for k, v in list(batch.items()):
+            if hasattr(v, "to"):
+                continue
+            # liste/tuple -> tensor
+            if isinstance(v, (list, tuple)):
+                try:
+                    batch[k] = torch.tensor(v)
+                except Exception:
+                    pass
+
+    return batch
+
+
 def train_hf(
     *,
     model,
@@ -99,6 +133,8 @@ def train_hf(
     - se optimizer è None -> solo forward (inference)
     - se outputs.loss esiste e optimizer non è None -> backward + step
     """
+    import torch  # lazy import 
+
     observers = observers or []
 
     if device is not None:
@@ -112,6 +148,9 @@ def train_hf(
             obs.on_epoch_start(epoch)
 
         for batch_idx, batch in enumerate(dataloader):
+            batch = _normalize_hf_batch(batch)
+
+            # batch_size robusto
             batch_size = None
             if isinstance(batch, dict):
                 ids = batch.get("input_ids", None)
@@ -123,6 +162,7 @@ def train_hf(
             for obs in observers:
                 obs.on_batch_start(bc)
 
+            # move to device
             if device is not None and isinstance(batch, dict):
                 batch = {k: (v.to(device) if hasattr(v, "to") else v) for k, v in batch.items()}
 
@@ -178,6 +218,8 @@ def train_hf_generative(
     - se manca labels e create_labels_if_missing=True: labels = input_ids.clone()
     - se outputs.loss e optimizer: backward+step
     """
+    import torch  # lazy import
+
     observers = observers or []
 
     if device is not None:
@@ -191,11 +233,16 @@ def train_hf_generative(
             obs.on_epoch_start(epoch)
 
         for batch_idx, batch in enumerate(dataloader):
+            batch = _normalize_hf_batch(batch)
+
             if not isinstance(batch, dict):
                 raise ValueError("train_hf_generative si aspetta batch dict (HF).")
 
             if create_labels_if_missing and "labels" not in batch and "input_ids" in batch:
-                batch["labels"] = batch["input_ids"].clone()
+                try:
+                    batch["labels"] = batch["input_ids"].clone()
+                except Exception:
+                    pass
 
             ids = batch.get("input_ids", None)
             batch_size = int(ids.shape[0]) if hasattr(ids, "shape") and len(ids.shape) >= 1 else None
