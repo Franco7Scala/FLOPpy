@@ -141,16 +141,19 @@ class TorchBackend(BaseBackend):
         self._root_handles.clear()
 
     def add_extra_flop(self, flop: int) -> None:
-    """
-    Aggiunge FLOP esterni (es. loss) al batch corrente.
-    Verranno sommati al totale a fine batch (_on_batch_end).
-    """
-    if flop is None:
-        return
-    fl = int(flop)
-    if fl <= 0:
-        return
-    self._current_batch_flop += fl
+        """
+        Aggiunge FLOP esterni (es. loss) al batch corrente.
+        Verranno sommati al totale a fine batch (_on_batch_end).
+        """
+        if flop is None:
+            return
+        fl = int(flop)
+        if fl <= 0:
+            return
+        self._current_batch_flop += fl
+
+
+
 
     # ---------------- HOOK DI BATCH ---------------- #
 
