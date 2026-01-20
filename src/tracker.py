@@ -115,7 +115,7 @@ class Tracker(AbstractContextManager, TrainingObserver):
     def on_batch_end(self, bc: BatchContext) -> None:
         return
 
-    def on_epoch_end(self, epoch: int) -> None:
+    def on_epoch_end(self, epoch: int) -> None: # <---- TODO farla una funzione da chiamare quando si vuole
         # log per epoch (se abilitato)
         if self.logger is not None and hasattr(self.logger, "log_epoch"):
             self.logger.log_epoch(

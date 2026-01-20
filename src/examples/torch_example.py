@@ -92,6 +92,37 @@ def main():
 
     loss_fn = nn.NLLLoss()
 
+    def my_hook(module, input, output):
+        # module: The layer that the hook is attached to
+        # input: A tuple containing the inputs to the layer
+        # output: The tensor output of the layer
+        print(f"Called!!!")
+
+    def my_hook_loss(module, input, output):
+        # module: The layer that the hook is attached to
+        # input: A tuple containing the inputs to the layer
+        # output: The tensor output of the layer
+        print(f"Called loss hook!!!")
+
+    def my_hook_loss_bkw(module, input, output):
+        # module: The layer that the hook is attached to
+        # input: A tuple containing the inputs to the layer
+        # output: The tensor output of the layer
+        print(f"Called loss hook bkw!!!")
+
+    def my_hook_loss_opt(module, input, output):
+        # module: The layer that the hook is attached to
+        # input: A tuple containing the inputs to the layer
+        # output: The tensor output of the layer
+        print(f"Called opt hook!!!")
+
+    handle = model.register_forward_hook(my_hook)
+    handle2 = loss_fn.register_forward_hook(my_hook_loss)
+    handle3 = loss_fn.register_full_backward_hook(my_hook_loss_bkw)
+    handle4 = optimizer.register_step_post_hook(my_hook_loss_opt)
+
+
+
     def train_fn_wrapped(*, model, optimizer, loss_fn, train_loader, device=None, epochs=1, observers=None):
         observers = observers or []
         if device is not None:
@@ -130,7 +161,7 @@ def main():
 
                 optimizer.step()
                 for obs in observers:
-                    obs.on_after_step(bc)
+                    obs.on_after_step(bc)  # <------- TODO
 
                 for obs in observers:
                     obs.on_batch_end(bc)
