@@ -18,7 +18,7 @@ except Exception:
 
 SENTENCES = [
     "Hello, this is a small generative test.",
-    "We are measuring FLOPs for a causal language model.",
+    "We are measuring FLOP for a causal language model.",
     "The tracker is observing the training loop externally.",
     "This sentence is just for batch variety.",
 ]
