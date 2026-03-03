@@ -9,9 +9,10 @@ class FlopReport:
     run_name: Optional[str]
     backend: str
 
+    # totale backend (modello + extra aggiunti via add_extra_flop, es. loss)
     model_flop: int
 
-    # breakdown esplicito
+    # breakdown esplicito (solo per stampa/report)
     loss_flop: int
     preproc_ops: int
 
@@ -25,12 +26,21 @@ class FlopReport:
 
 class FlopTracker:
     """
+    Facade:
     - Nasconde complessità di Tracker + backend + logger + training algorithm
     - Espone un'unica API di alto livello: run(...)
-    - Il training rimane esterno e viene passato come funzione (Strategy-like)
+    - Supporta due modalità user-friendly:
+        A) Observer (train_fn accetta observers=[...])  -> default
+        B) Hook-based (train_fn NON serve observer-aware) -> attivi via use_training_hooks=True (solo torch)
     """
 
-    def __init__(self, run_name: Optional[str] = None, *, print_summary: bool = True, print_hardware: bool = False):
+    def __init__(
+        self,
+        run_name: Optional[str] = None,
+        *,
+        print_summary: bool = True,
+        print_hardware: bool = False,
+    ):
         self.run_name = run_name
         self.print_summary = print_summary
         self.print_hardware = print_hardware
@@ -59,14 +69,22 @@ class FlopTracker:
         wandb_token: Optional[str] = None,
         # extra
         extra_ctx: Optional[Dict[str, Any]] = None,
+        # NEW: hook-based training observation
+        use_training_hooks: bool = False,
+        hooks_debug_print: bool = False,
     ) -> "FlopTracker":
         """
         Esegue una run osservata dal Tracker.
 
-        Parametri chiave:
-        - train_fn: funzione di training esterna (es. trainers.train_torch / train_hf / train_sklearn)
-        - train_kwargs: parametri specifici dell'algoritmo (optimizer, loss_fn, loader, ecc.)
-        - train_fn deve accettare observers=[...]
+        Modalità:
+        - use_training_hooks=False (default):
+            train_fn DEVE accettare observers=[...]
+        - use_training_hooks=True (solo torch):
+            train_fn può essere "vanilla" (non observer-aware).
+            Il Tracker installa hook su model/loss/optimizer e raccoglie i costi extra.
+            In questo caso è consigliato passare in train_kwargs anche:
+              - loss_fn
+              - optimizer
         """
         from tracker import Tracker  # import locale per evitare problemi di packaging
 
@@ -93,9 +111,31 @@ class FlopTracker:
             run_name=self.run_name,
         ) as tr:
 
-            # Training esterno 
-            train_fn(**train_kwargs, observers=[tr])
+            # ------------------ modalità HOOKS (torch) ------------------ #
+            if use_training_hooks:
+                if backend not in ("torch", "auto"):
+                    raise ValueError("use_training_hooks=True è supportato solo per backend='torch' (o 'auto' con torch).")
 
+                loss_fn = train_kwargs.get("loss_fn", None)
+                optimizer = train_kwargs.get("optimizer", None)
+
+                # installa hook (se loss_fn/optimizer sono None, i relativi hook vengono saltati)
+                tr.attach_torch_hooks(
+                    model=model,
+                    loss_fn=loss_fn,
+                    optimizer=optimizer,
+                    enable_debug_print=hooks_debug_print,
+                )
+
+                # esegui training "vanilla" (NON serve observers)
+                train_fn(**train_kwargs)
+
+            # ------------------ modalità OBSERVER (default) ------------------ #
+            else:
+                # train_fn deve accettare observers=[...]
+                train_fn(**train_kwargs, observers=[tr])
+
+            # report
             model_flop = int(tr.total_flop)
             loss_flop = int(getattr(tr, "total_loss_flop", 0))
             preproc_ops = int(getattr(tr, "total_preproc_ops", 0))
@@ -124,10 +164,10 @@ class FlopTracker:
         if rep.extra.get("hardware") is not None:
             print(f"[FlopTracker{run_label}] Hardware: {rep.extra['hardware']}")
 
-        # Questo è il totale FLOP del modello 
+        # totale backend (modello + extra)
         print(f"[FlopTracker{run_label}] FLOP modello (incl. extra): {rep.model_flop}")
 
-        # Breakdown esplicito
+        # breakdown esplicito
         if rep.loss_flop > 0:
             print(f"[FlopTracker{run_label}] FLOP loss (forward): {rep.loss_flop}")
         if rep.preproc_ops > 0:
