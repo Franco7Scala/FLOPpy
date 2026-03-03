@@ -7,13 +7,17 @@ from backends import create_backend
 from ft_logging import create_logger
 from observers import TrainingObserver, BatchContext
 
+from training_hooks import TorchTrainingHooks
+
 
 class Tracker(AbstractContextManager, TrainingObserver):
     """
     Tracker Observer:
     - Instanzia backend e logger
-    - Aggancia hook FLOP modello
-    - Osserva eventi del training per includere costi extra (loss, tokenizer, ecc.)
+    - Aggancia hook FLOP modello (backend)
+    - Osserva eventi del training (Observer) per includere costi extra (loss, tokenizer, ecc.)
+    - Opzionalmente usa TorchTrainingHooks per "osservare" il training via hook PyTorch
+      senza richiedere trainers observer-aware
     - Espone metriche finali
     """
 
@@ -41,11 +45,14 @@ class Tracker(AbstractContextManager, TrainingObserver):
 
         self.backend = create_backend(model, backend, logger=self.logger)
 
-        # contatori extra (fuori dagli hook)
+        # contatori extra (fuori dagli hook di layer)
         self._preproc_ops: int = 0
         self._loss_flop: int = 0
 
         self._epoch_idx: int = 0
+
+        # training hooks (loss forward/backward, optimizer step, ecc.)
+        self._hooks: Optional[TorchTrainingHooks] = None
 
     # ---------------- Context Manager ---------------- #
 
@@ -54,6 +61,14 @@ class Tracker(AbstractContextManager, TrainingObserver):
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        # rimuove hook training se installati
+        try:
+            if self._hooks is not None:
+                self._hooks.uninstall()
+                self._hooks = None
+        except Exception:
+            pass
+
         self.backend.stop()
         if self.logger is not None:
             self.logger.close()
@@ -73,6 +88,12 @@ class Tracker(AbstractContextManager, TrainingObserver):
     def total_loss_flop(self) -> int:
         return int(self._loss_flop)
 
+    @property
+    def total_operations(self) -> float:
+        # NON aggregare loss qui, perché la loss viene già aggiunta al backend tramite add_extra_flop
+        # -> quindi total_flop include già "modello + extra".
+        return float(self.total_flop + self.total_preproc_ops)
+
     # ---------------- API per preproc/tokenizer ---------------- #
 
     def add_preproc_ops(self, ops: int) -> None:
@@ -81,6 +102,26 @@ class Tracker(AbstractContextManager, TrainingObserver):
         v = int(ops)
         if v > 0:
             self._preproc_ops += v
+
+    # ---------------- API HOOKS (Torch) ---------------- #
+
+    def attach_torch_hooks(
+        self,
+        *,
+        model,
+        loss_fn=None,
+        optimizer=None,
+        enable_debug_print: bool = False,
+    ) -> None:
+        """
+        Installa hook PyTorch per osservare training senza trainers observer-aware.
+
+        - model: serve per register_forward_hook
+        - loss_fn: serve per hook forward/backward sulla loss
+        - optimizer: serve per hook post-step (se supportato dalla versione torch)
+        """
+        self._hooks = TorchTrainingHooks(self, enable_debug_print=enable_debug_print)
+        self._hooks.install(model=model, loss_fn=loss_fn, optimizer=optimizer)
 
     # ---------------- Observer callbacks ---------------- #
 
@@ -99,7 +140,10 @@ class Tracker(AbstractContextManager, TrainingObserver):
         return
 
     def on_after_loss(self, bc: BatchContext, loss: Any, outputs: Any, targets: Any) -> None:
-      
+        """
+        Modalità Observer-classica (trainers observer-aware).
+        In modalità HOOKS invece, la loss viene contabilizzata da training_hooks.py.
+        """
         loss_flop = self._estimate_loss_flop(loss=loss, outputs=outputs, targets=targets, extra=bc.extra)
         if loss_flop > 0:
             self._loss_flop += int(loss_flop)
@@ -115,7 +159,7 @@ class Tracker(AbstractContextManager, TrainingObserver):
     def on_batch_end(self, bc: BatchContext) -> None:
         return
 
-    def on_epoch_end(self, epoch: int) -> None: # <---- TODO farla una funzione da chiamare quando si vuole
+    def on_epoch_end(self, epoch: int) -> None:
         # log per epoch (se abilitato)
         if self.logger is not None and hasattr(self.logger, "log_epoch"):
             self.logger.log_epoch(
@@ -198,8 +242,6 @@ class Tracker(AbstractContextManager, TrainingObserver):
             # preds: (B, C) o (B, T, C). targets: (B) o (B, T)
             if preds.dim() == 2:
                 B, C = int(preds.shape[0]), int(preds.shape[1])
-                # stima: logsumexp ~ (exp C + sum + log) + subtract + gather
-                # -> circa (3C + 2) per sample + reduce (B-1)
                 return max(0, B * (3 * C + 2) + (B - 1))
             if preds.dim() == 3:
                 B, T, C = int(preds.shape[0]), int(preds.shape[1]), int(preds.shape[2])
@@ -208,23 +250,19 @@ class Tracker(AbstractContextManager, TrainingObserver):
             return 0
 
         if loss_type == "mse":
-            # (pred-target)^2 -> sub + mul, poi riduce sum/mean
             N = int(preds.numel())
             return max(0, 2 * N + (N - 1))
 
         if loss_type == "l1":
-            # |pred-target| -> sub + abs, poi riduce
             N = int(preds.numel())
             return max(0, 2 * N + (N - 1))
 
         if loss_type == "bce":
             N = int(preds.numel())
-            # stima grezza: log + mul + add per elemento
             return max(0, 6 * N + (N - 1))
 
         if loss_type in ("bce_logits", "bcewithlogits"):
             N = int(preds.numel())
-            # sigmoid + bce
             return max(0, 10 * N + (N - 1))
 
         if loss_type == "kl":
