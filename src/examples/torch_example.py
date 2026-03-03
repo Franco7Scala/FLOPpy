@@ -8,7 +8,6 @@ from torch.utils.data import DataLoader, TensorDataset
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from flop_tracker import FlopTracker
-from trainers import train_torch
 
 
 class ManyLayersNet(nn.Module):
@@ -49,7 +48,7 @@ class ManyLayersNet(nn.Module):
             nn.Linear(64 * 8 * 8, 256),
             nn.Tanh(),
             nn.Linear(256, num_classes),
-            nn.LogSoftmax(dim=-1),   # log-softmax (per NLLLoss, opzionale)
+            nn.LogSoftmax(dim=-1),  # per NLLLoss
         )
 
     def forward(self, x_img, x_tok):
@@ -61,13 +60,13 @@ class ManyLayersNet(nn.Module):
         e = self.emb(x_tok)           # (B, T, E)
         r, _ = self.rnn(e)            # (B, T, 64)
 
-        # cells step (usiamo solo un time-step per esercitare i cell)
+        # cells step (solo un time-step)
         h0 = r[:, 0, :]               # (B, 64)
         h1, c1 = self.lstm_cell(h0)   # (B, 64)
         h2 = self.gru_cell(h1)        # (B, 64)
 
         # MHA expects (L, N, E)
-        q = h2.unsqueeze(0)           # (1, B, 64)
+        q = h2.unsqueeze(0)              # (1, B, 64)
         attn_out, _ = self.mha(q, q, q)  # (1, B, 64)
         enc_out = self.encoder(attn_out) # (1, B, 64)
 
@@ -75,10 +74,33 @@ class ManyLayersNet(nn.Module):
         return out
 
 
+def train_torch_vanilla(*, model, optimizer, loss_fn, train_loader, device=None, epochs=1):
+    """
+    Training loop vanilla:
+    - NON chiama observers
+    - NON richiama callback
+    - Serve per testare use_training_hooks=True
+    """
+    if device is not None:
+        model.to(device)
+
+    model.train()
+    for _epoch in range(epochs):
+        for (img, tok, yb) in train_loader:
+            if device is not None:
+                img, tok, yb = img.to(device), tok.to(device), yb.to(device)
+
+            optimizer.zero_grad(set_to_none=True)
+            outputs = model(img, tok)
+            loss = loss_fn(outputs, yb)
+            loss.backward()
+            optimizer.step()
+
+
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    # fake dataset
+    # dataset
     B = 256
     x_img = torch.randn(B, 3, 32, 32)
     x_tok = torch.randint(0, 500, (B, 12))
@@ -89,93 +111,12 @@ def main():
 
     model = ManyLayersNet(num_classes=10)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-
     loss_fn = nn.NLLLoss()
 
-    def my_hook(module, input, output):
-        # module: The layer that the hook is attached to
-        # input: A tuple containing the inputs to the layer
-        # output: The tensor output of the layer
-        print(f"Called!!!")
-
-    def my_hook_loss(module, input, output):
-        # module: The layer that the hook is attached to
-        # input: A tuple containing the inputs to the layer
-        # output: The tensor output of the layer
-        print(f"Called loss hook!!!")
-
-    def my_hook_loss_bkw(module, input, output):
-        # module: The layer that the hook is attached to
-        # input: A tuple containing the inputs to the layer
-        # output: The tensor output of the layer
-        print(f"Called loss hook bkw!!!")
-
-    def my_hook_loss_opt(module, input, output):
-        # module: The layer that the hook is attached to
-        # input: A tuple containing the inputs to the layer
-        # output: The tensor output of the layer
-        print(f"Called opt hook!!!")
-
-    handle = model.register_forward_hook(my_hook)
-    handle2 = loss_fn.register_forward_hook(my_hook_loss)
-    handle3 = loss_fn.register_full_backward_hook(my_hook_loss_bkw)
-    handle4 = optimizer.register_step_post_hook(my_hook_loss_opt)
-
-
-
-    def train_fn_wrapped(*, model, optimizer, loss_fn, train_loader, device=None, epochs=1, observers=None):
-        observers = observers or []
-        if device is not None:
-            model.to(device)
-
-        for obs in observers:
-            obs.on_train_start({"backend": "torch"})
-
-        for epoch in range(epochs):
-            for obs in observers:
-                obs.on_epoch_start(epoch)
-
-            for batch_idx, (img, tok, yb) in enumerate(train_loader):
-                if device is not None:
-                    img, tok, yb = img.to(device), tok.to(device), yb.to(device)
-
-                from observers import BatchContext
-                bc = BatchContext(epoch=epoch, batch_idx=batch_idx, batch_size=int(img.shape[0]))
-
-                for obs in observers:
-                    obs.on_batch_start(bc)
-
-                optimizer.zero_grad(set_to_none=True)
-                outputs = model(img, tok)
-
-                for obs in observers:
-                    obs.on_after_forward(bc, outputs)
-
-                loss = loss_fn(outputs, yb)
-                for obs in observers:
-                    obs.on_after_loss(bc, loss, outputs, yb)
-
-                loss.backward()
-                for obs in observers:
-                    obs.on_after_backward(bc)
-
-                optimizer.step()
-                for obs in observers:
-                    obs.on_after_step(bc)  # <------- TODO
-
-                for obs in observers:
-                    obs.on_batch_end(bc)
-
-            for obs in observers:
-                obs.on_epoch_end(epoch)
-
-        for obs in observers:
-            obs.on_train_end({"backend": "torch"})
-
-    FlopTracker(run_name="torch_many_layers_observer", print_summary=True, print_hardware=True).run(
+    FlopTracker(run_name="torch_many_layers_hooks", print_summary=True, print_hardware=True).run(
         model=model,
         backend="torch",
-        train_fn=train_fn_wrapped,
+        train_fn=train_torch_vanilla,
         train_kwargs={
             "model": model,
             "optimizer": optimizer,
@@ -184,10 +125,13 @@ def main():
             "device": device,
             "epochs": 2,
         },
+        # logging
         log_per_batch=True,
         log_per_epoch=True,
-        export_path="torch_many_layers_flop.csv",
+        export_path="torch_many_layers_hooks_flop.csv",
         use_wandb=False,
+        use_training_hooks=True,
+        hooks_debug_print=True,  
     )
 
 
