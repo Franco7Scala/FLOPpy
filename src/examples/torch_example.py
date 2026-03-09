@@ -7,7 +7,7 @@ from torch.utils.data import DataLoader, TensorDataset
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from flop_tracker import FlopTracker
+from floppy_tracker import FLOPpyTracker
 
 
 class ManyLayersNet(nn.Module):
@@ -113,7 +113,7 @@ def main():
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     loss_fn = nn.NLLLoss()
 
-    FlopTracker(run_name="torch_many_layers_hooks", print_summary=True, print_hardware=True).run(
+    FLOPpyTracker(run_name="torch_many_layers_hooks", print_summary=True, print_hardware=True).run(
         model=model,
         backend="torch",
         train_fn=train_torch_vanilla,

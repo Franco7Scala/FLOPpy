@@ -8,7 +8,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from flop_tracker import FlopTracker
+from floppy_tracker import FLOPpyTracker
 from trainers import train_hf
 
 # (opzionale) wrapper tokenizer ops
@@ -66,7 +66,7 @@ def main():
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
 
-    ft = FlopTracker(run_name="hf_distilbert_sst2_observer", print_summary=True, print_hardware=True)
+    ft = FLOPpyTracker(run_name="hf_distilbert_sst2_observer", print_summary=True, print_hardware=True)
 
     def train_fn_wrapped(*, model, dataloader, optimizer, device=None, epochs=1, observers=None):
         observers = observers or []

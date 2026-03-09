@@ -2,16 +2,6 @@ from __future__ import annotations
 
 from .base import BaseBackend
 
-try:
-    from transformers import PreTrainedModel
-except Exception:
-    PreTrainedModel = None
-
-
-def _looks_like_hf_model(model) -> bool:
-    # fallback robusto: attributi tipici di transformers
-    return hasattr(model, "config") and hasattr(model, "forward")
-
 
 def create_backend(model, backend: str, logger=None) -> BaseBackend:
     """
@@ -21,21 +11,6 @@ def create_backend(model, backend: str, logger=None) -> BaseBackend:
     - evita crash se torch_backend ha errori mentre stai testando sklearn
     """
     backend = (backend or "auto").lower()
-
-    # ---------- HuggingFace ---------- #
-    if backend in ("hf", "auto"):
-        is_hf = False
-        if PreTrainedModel is not None and isinstance(model, PreTrainedModel):
-            is_hf = True
-        elif _looks_like_hf_model(model):
-            is_hf = True
-
-        if is_hf:
-            from .hf_backend import HFBackend  # lazy import
-            return HFBackend(model, logger=logger)
-
-        if backend == "hf":
-            raise ValueError("backend='hf' ma il modello non sembra un PreTrainedModel HuggingFace.")
 
     # ---------- PyTorch ---------- #
     if backend in ("torch", "auto"):

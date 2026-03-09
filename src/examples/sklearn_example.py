@@ -7,7 +7,7 @@ from sklearn.linear_model import LogisticRegression
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from flop_tracker import FlopTracker
+from floppy_tracker import FLOPpyTracker
 from trainers import train_sklearn
 
 
@@ -23,7 +23,7 @@ def main():
     model = LogisticRegression(max_iter=1000)
 
     # FIT
-    FlopTracker(run_name="sklearn_logreg_fit", print_summary=True).run(
+    FLOPpyTracker(run_name="sklearn_logreg_fit", print_summary=True).run(
         model=model,
         backend="sklearn",
         train_fn=train_sklearn,
@@ -34,7 +34,7 @@ def main():
     )
 
     # PREDICT
-    FlopTracker(run_name="sklearn_logreg_predict", print_summary=True).run(
+    FLOPpyTracker(run_name="sklearn_logreg_predict", print_summary=True).run(
         model=model,
         backend="sklearn",
         train_fn=train_sklearn,

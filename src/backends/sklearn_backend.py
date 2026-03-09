@@ -17,6 +17,7 @@ class SklearnBackend(BaseBackend):
 
     def __init__(self, model, logger=None):
         super().__init__(model, logger=logger)
+
         self._orig_fit: Optional[Callable] = None
         self._orig_predict: Optional[Callable] = None
         self._orig_predict_proba: Optional[Callable] = None

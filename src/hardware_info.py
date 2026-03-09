@@ -1,20 +1,11 @@
-from __future__ import annotations
-
-from dataclasses import dataclass, asdict
-from typing import Any, Dict, Optional
-import os
 import platform
 import sys
+import psutil
+import torch
 
-try:
-    import psutil
-except Exception:
-    psutil = None
-
-try:
-    import torch
-except Exception:
-    torch = None
+from __future__ import annotations
+from dataclasses import dataclass, asdict
+from typing import Any, Dict, Optional
 
 
 @dataclass
@@ -52,12 +43,9 @@ def get_hardware_info() -> HardwareInfo:
     ram_gb = None
 
     if psutil is not None:
-        try:
-            cpu_logical = psutil.cpu_count(logical=True)
-            cpu_physical = psutil.cpu_count(logical=False)
-            ram_gb = _bytes_to_gb(psutil.virtual_memory().total)
-        except Exception:
-            pass
+        cpu_logical = psutil.cpu_count(logical=True)
+        cpu_physical = psutil.cpu_count(logical=False)
+        ram_gb = _bytes_to_gb(psutil.virtual_memory().total)
 
     cuda_avail = None
     gpu_name = None
@@ -65,14 +53,12 @@ def get_hardware_info() -> HardwareInfo:
     torch_ver = None
 
     if torch is not None:
-        try:
-            torch_ver = getattr(torch, "__version__", None)
-            cuda_avail = bool(torch.cuda.is_available())
-            if cuda_avail:
-                gpu_count = int(torch.cuda.device_count())
-                gpu_name = torch.cuda.get_device_name(0) if gpu_count and gpu_count > 0 else None
-        except Exception:
-            pass
+        torch_ver = getattr(torch, "__version__", None)
+        cuda_avail = bool(torch.cuda.is_available())
+        if cuda_avail:
+            gpu_count = int(torch.cuda.device_count())
+            gpu_name = torch.cuda.get_device_name(0) if gpu_count and gpu_count > 0 else None
+
 
     return HardwareInfo(
         os=os_name,

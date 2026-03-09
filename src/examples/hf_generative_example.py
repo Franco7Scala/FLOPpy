@@ -7,7 +7,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
-from flop_tracker import FlopTracker
+from floppy_tracker import FLOPpyTracker
 from trainers import train_hf_generative
 
 try:
@@ -65,7 +65,7 @@ def main():
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=5e-5)
 
-    ft = FlopTracker(run_name="hf_distilgpt2_generative_observer", print_summary=True, print_hardware=True)
+    ft = FLOPpyTracker(run_name="hf_distilgpt2_generative_observer", print_summary=True, print_hardware=True)
 
     def train_fn_wrapped(*, model, dataloader, optimizer, device=None, epochs=1, observers=None):
         observers = observers or []

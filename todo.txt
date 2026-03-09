@@ -1,0 +1,6 @@
+implemetare tutti gli hook
+pulire metodo che non servono più
+aggiornare esempio di utilizzo
+tradurre i commenti e le stampe in inglese
+
+fare documentazione
