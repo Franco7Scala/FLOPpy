@@ -1,7 +1,10 @@
 from __future__ import annotations
-from torch.nn import nn
+
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
+
+from torch.optim import Optimizer
+
 from backends.sklearn_backend import SklearnBackend
 
 
@@ -13,7 +16,7 @@ class FLOPpyReport:
     # totale backend (modello + extra aggiunti via add_extra_flop, es. loss)
     model_flop: int
 
-    # breakdown esplicito (solo per stampa/report)
+    # breakdown esplicito
     optimizer_flop: int
     loss_flop: int
     preproc_ops: int
@@ -23,17 +26,18 @@ class FLOPpyReport:
     use_wandb: bool
     wandb_project: Optional[str]
 
-    hardware: Dict[str, Any]
+    hardware: Optional[Dict[str, Any]]
 
 
 class FLOPpyTracker:
     """
-    Facade:
-    - Nasconde complessità di Tracker + backend + logger + training algorithm
-    - Espone un'unica API di alto livello: run(...)
-    - Supporta due modalità user-friendly:
-        A) Observer (train_fn accetta observers=[...])  -> default
-        B) Hook-based (train_fn NON serve observer-aware) -> attivi via use_training_hooks=True (solo torch)
+    Facade hook-only.
+
+    Obiettivi:
+    - nasconde la complessità di Tracker + backend + logger + training hooks
+    - espone un'unica API di alto livello: run(...)
+    - l'utente fornisce un train_fn 
+    - il tracking avviene automaticamente via hook
     """
 
     def __init__(
@@ -50,43 +54,51 @@ class FLOPpyTracker:
     @property
     def report(self) -> FLOPpyReport:
         if self._report is None:
-            raise RuntimeError("Nessun report disponibile: esegui prima FlopTracker.run(...).")
+            raise RuntimeError("Nessun report disponibile: esegui prima FLOPpyTracker.run(...).")
         return self._report
 
     def run(
         self,
+        *,
         model,
-        optimizer: Optional[nn.Module] = None,
-        loss_fn: Optional[nn.Module] = None,
+        train_fn: Optional[Callable[..., None]] = None,
+        train_kwargs: Optional[Dict[str, Any]] = None,
+        backend: str = "auto",
+        optimizer: Optional[Optimizer] = None,
+        loss_fn: Optional[Any] = None,
         export_path: Optional[str] = None,
-        # wandb
         use_wandb: bool = False,
         wandb_project: Optional[str] = None,
         wandb_token: Optional[str] = None,
+        hooks_debug_print: bool = False,
     ) -> FLOPpyTracker:
         """
-        Esegue una run osservata dal Tracker.
+        Esegue una run hook-based.
 
-        Modalità:
-        - use_training_hooks=False (default):
-            train_fn DEVE accettare observers=[...]
-        - use_training_hooks=True (solo torch):
-            train_fn può essere "vanilla" (non observer-aware).
-            Il Tracker installa hook su model/loss/optimizer e raccoglie i costi extra.
-            In questo caso è consigliato passare in train_kwargs anche:
-              - loss_fn
-              - optimizer
+        Parametri:
+        - model: modello da tracciare
+        - train_fn: funzione di training
+        - train_kwargs: parametri da passare a train_fn
+        - backend: 'torch', 'sklearn', 'auto'
+        - optimizer: ottimizzatore (serve per step hook)
+        - loss_fn: loss module (serve per loss forward/backward hooks)
         """
-        from tracker import Tracker  # import locale per evitare problemi di packaging
+        from tracker import Tracker
 
-        # (opzionale) hardware info stile codecarbon
+        train_kwargs = train_kwargs or {}
+
+        # hardware info opzionale
         hw = None
         if self.print_hardware:
-            from hardware_info import get_hardware_info
-            hw = get_hardware_info()
+            try:
+                from hardware_info import get_hardware_info
+                hw = get_hardware_info()
+            except Exception:
+                hw = None
 
         with Tracker(
             model=model,
+            backend=backend,
             export_path=export_path,
             use_wandb=use_wandb,
             wandb_project=wandb_project,
@@ -94,22 +106,29 @@ class FLOPpyTracker:
             run_name=self.run_name,
         ) as tr:
 
-            # ------------------ modalità HOOKS (torch) ------------------ #
-            if not tr.backend is SklearnBackend:
+            # hook torch/hf: sklearn non li usa
+            if not isinstance(tr.backend, SklearnBackend):
                 tr.attach_torch_hooks(
                     model=model,
                     loss_fn=loss_fn,
-                    optimizer=optimizer
+                    optimizer=optimizer,
+                    enable_debug_print=hooks_debug_print,
                 )
 
-            # report
+            # esegui training mentre gli hook sono attivi
+            if train_fn is not None:
+                train_fn(**train_kwargs)
+
+            # report finale
             model_flop = int(tr.total_flop)
-            optimizer_flop = int(getattr(tr, "total_optimizer_flop", 0))
+            # per ora optimizer FLOP non viene stimato: lo lasciamo a 0
+            optimizer_flop = 0
             loss_flop = int(getattr(tr, "total_loss_flop", 0))
             preproc_ops = int(getattr(tr, "total_preproc_ops", 0))
 
             self._report = FLOPpyReport(
                 run_name=self.run_name,
+                backend=backend,
                 model_flop=model_flop,
                 optimizer_flop=optimizer_flop,
                 loss_flop=loss_flop,
@@ -129,19 +148,22 @@ class FLOPpyTracker:
         rep = self.report
         run_label = f"[{rep.run_name}]" if rep.run_name else ""
 
-        if rep.extra.get("hardware") is not None:
-            print(f"[FlopTracker{run_label}] Hardware: {rep.extra['hardware']}")
+        if rep.hardware is not None:
+            print(f"[FLOPpyTracker{run_label}] Hardware: {rep.hardware}")
 
-        # totale backend (modello + extra)
-        print(f"[FlopTracker{run_label}] FLOP modello (incl. extra): {rep.model_flop}")
+        print(f"[FLOPpyTracker{run_label}] FLOP modello (incl. extra): {rep.model_flop}")
 
-        # breakdown esplicito
         if rep.loss_flop > 0:
-            print(f"[FlopTracker{run_label}] FLOP loss (forward): {rep.loss_flop}")
+            print(f"[FLOPpyTracker{run_label}] FLOP loss (forward): {rep.loss_flop}")
+
+        if rep.optimizer_flop > 0:
+            print(f"[FLOPpyTracker{run_label}] FLOP optimizer: {rep.optimizer_flop}")
+
         if rep.preproc_ops > 0:
-            print(f"[FlopTracker{run_label}] Ops preprocessing/tokenizer: {rep.preproc_ops}")
+            print(f"[FLOPpyTracker{run_label}] Ops preprocessing/tokenizer: {rep.preproc_ops}")
 
         if rep.export_path:
-            print(f"[FlopTracker{run_label}] Export CSV: {rep.export_path}")
+            print(f"[FLOPpyTracker{run_label}] Export CSV: {rep.export_path}")
+
         if rep.use_wandb and rep.wandb_project:
-            print(f"[FlopTracker{run_label}] W&B project: {rep.wandb_project}")
+            print(f"[FLOPpyTracker{run_label}] W&B project: {rep.wandb_project}")
