@@ -7,9 +7,9 @@ from .base import BaseBackend
 
 class TorchBackend(BaseBackend):
     """
-    Backend per modelli PyTorch.
-    - Gestisce DataParallel / DDP usando .module
-    - Conta i FLOP di:
+    Backend for PyTorch models.
+    - Handles DataParallel / DDP by accessing .module.
+    - Counts FLOPs for:
         * Conv1d / Conv2d / Conv3d
         * ConvTranspose1d / 2d / 3d
         * Linear
@@ -24,9 +24,6 @@ class TorchBackend(BaseBackend):
         * Embedding / EmbeddingBag
         * Transformer 
         * DataParallel
-        
-        Per i container / wrapper (Transformer e DataParallel) restituisce FLOP = 0, conteggiando i FLOP reali dai sotto-moduli già hookati.
-    - Logga per batch / epoch / wandb tramite logger (se presente)
     """
 
     def __init__(self, model: nn.Module, logger=None):
@@ -42,12 +39,12 @@ class TorchBackend(BaseBackend):
     # ---------------- START / STOP ---------------- #
 
     def start(self):
-        # Hook sui layer da tracciare
+        # Hooks on layers to be tracked
         for module in self.model.modules():
             if isinstance(
                 module,
                 (
-                    # --- Convoluzioni / Linear ---
+                    # --- Convolutions / Linear ---
                     nn.Conv1d,
                     nn.Conv2d,
                     nn.Conv3d,
@@ -106,14 +103,14 @@ class TorchBackend(BaseBackend):
                     nn.Embedding,
                     nn.EmbeddingBag,
 
-                    # --- Transformer high-level containers (FLOP = 0 qui) ---
+                    # --- Transformer high-level containers ---
                     nn.Transformer,
                     nn.TransformerEncoder,
                     nn.TransformerDecoder,
                     nn.TransformerEncoderLayer,
                     nn.TransformerDecoderLayer,
 
-                    # --- DataParallel wrapper (FLOP = 0 qui) ---
+                    # --- DataParallel wrapper  ---
                     nn.DataParallel,
                 ),
             ):
@@ -127,7 +124,7 @@ class TorchBackend(BaseBackend):
                     h = module.register_forward_hook(self._layer_hook)
                     self._layer_handles.append(h)
 
-        # Hook sul modello root per identificare inizio/fine batch
+        # Root model hook to identify batch start/end
         pre_h = self.model.register_forward_pre_hook(self._on_batch_start)
         post_h = self.model.register_forward_hook(self._on_batch_end)
         self._root_handles.extend([pre_h, post_h])
@@ -139,23 +136,9 @@ class TorchBackend(BaseBackend):
             h.remove()
         self._layer_handles.clear()
         self._root_handles.clear()
+        
 
-    def add_extra_flop(self, flop: int) -> None:
-        """
-        Aggiunge FLOP esterni (es. loss) al batch corrente.
-        Verranno sommati al totale a fine batch (_on_batch_end).
-        """
-        if flop is None:
-            return
-        fl = int(flop)
-        if fl <= 0:
-            return
-        self._current_batch_flop += fl
-
-
-
-
-    # ---------------- HOOK DI BATCH ---------------- #
+    # ---------------- BATCH HOOK  ---------------- #
 
     def _on_batch_start(self, module, input):
         self._current_batch_flop = 0
@@ -174,14 +157,13 @@ class TorchBackend(BaseBackend):
                 epoch=self._epoch_idx,
             )
 
-    # ---------------- HOOK DEI LAYER ---------------- #
+    # ---------------- LAYER HOOK ---------------- #
 
     def _layer_hook(self, layer, input, output):
-        # alcuni layer (es. MHA) hanno input/output non banali
+        # some layer have not trivial input/output 
         x = input[0] if isinstance(input, (tuple, list)) and len(input) > 0 else None
         y = output
 
-        # se output è tuple/list, si prende il primo tensore
         if isinstance(y, (tuple, list)):
             y = next((o for o in y if isinstance(o, torch.Tensor)), None)
 
@@ -271,7 +253,7 @@ class TorchBackend(BaseBackend):
 
         self._current_batch_flop += int(flop)
 
-    # ---------------- FORMULE FLOP ---------------- #
+    # ---------------- FLOP FORMULAS ---------------- #
     # Conv
 
     def _conv1d_flop(self, conv: nn.Conv1d, x, y):
@@ -393,7 +375,7 @@ class TorchBackend(BaseBackend):
         flop_per_out = k_eff
         return batch_size * C * D_out * H_out * W_out * flop_per_out
 
-    # Normalization (stima: ~4 FLOP per elemento)
+    # Normalization (estimation: ~4 FLOP per elemento)
     def _batchnorm_flop(self, layer, x, y):
         return 4 * y.numel()
 
@@ -406,7 +388,7 @@ class TorchBackend(BaseBackend):
     def _instancenorm_flop(self, layer, x, y):
         return 4 * y.numel()
 
-    # RMSNorm (stima dedicata)
+    # RMSNorm (estimation)
     def _rmsnorm_flop(self, layer, x, y):
         # normalized_shape può essere int o tuple
         norm_shape = getattr(layer, "normalized_shape", None)
@@ -465,7 +447,7 @@ class TorchBackend(BaseBackend):
         softmax_ops = vectors * (k + (k - 1) + k)  # (3k - 1)
 
         if isinstance(layer, nn.Softmin):
-            # softmin(x)=softmax(-x): aggiungo k negazioni
+            # softmin(x)=softmax(-x): 
             return softmax_ops + vectors * k
 
         if isinstance(layer, nn.LogSoftmax):
@@ -474,7 +456,7 @@ class TorchBackend(BaseBackend):
 
         return softmax_ops
 
-    # RNN / LSTM / GRU (stima classica per gate)
+    # RNN / LSTM / GRU (classic estimation)
     def _rnn_flop(self, layer, x, y):
         batch_first = getattr(layer, "batch_first", False)
         if batch_first:
@@ -522,10 +504,9 @@ class TorchBackend(BaseBackend):
         I = int(x.shape[-1])
         H = int(layer.hidden_size)
         fl = 4 * (2 * B * H * I)
-        # hx può essere (h,c) oppure Tensor;
         if hx is not None:
             fl += 4 * (2 * B * H * H)
-        fl += 10 * B * H  # attivazioni + combinazioni 
+        fl += 10 * B * H 
         return int(fl)
 
     def _grucell_flop(self, layer: nn.GRUCell, inputs, y):
@@ -539,10 +520,10 @@ class TorchBackend(BaseBackend):
         fl = 3 * (2 * B * H * I)
         if isinstance(hx, torch.Tensor):
             fl += 3 * (2 * B * H * H)
-        fl += 8 * B * H  # attivazioni + combinazioni 
+        fl += 8 * B * H  
         return int(fl)
 
-    # MultiheadAttention (stima)
+    # MultiheadAttention (estimation)
     def _mha_flop(self, layer: nn.MultiheadAttention, input, output):
         q = input[0]
         k = input[1] if len(input) > 1 and input[1] is not None else q
@@ -561,7 +542,7 @@ class TorchBackend(BaseBackend):
 
         return flop_qkv + flop_scores + flop_attn_v + flop_out
 
-    # Embedding (lookup: 1 FLOP per valore estratto)
+    # Embedding (lookup: 1 FLOP for extracted value)
     def _embedding_flop(self, layer: nn.Embedding, x, y):
         num_indices = x.numel()
         emb_dim = layer.embedding_dim
