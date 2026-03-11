@@ -1,7 +1,13 @@
 from __future__ import annotations
 from .base_logger import BaseLogger
 
+
 class WandbLogger(BaseLogger):
+    """
+    Logger for Weights & Biases.
+    Only records the final FLOP summary.
+    """
+
     def __init__(
         self,
         use_wandb: bool,
@@ -32,7 +38,7 @@ class WandbLogger(BaseLogger):
                     pass
 
             self._run = wandb.init(
-                project=self.wandb_project or "floppy",
+                project=self.wandb_project or "FLOPpy",
                 name=self.run_name,
                 reinit=True,
             )
@@ -64,3 +70,5 @@ class WandbLogger(BaseLogger):
                 self._run.finish()
             except Exception:
                 pass
+            finally:
+                self._run = None
