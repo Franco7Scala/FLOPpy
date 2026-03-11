@@ -139,7 +139,7 @@ class Tracker(AbstractContextManager):
         Installs PyTorch hooks for loss and optimizer.
         
         Note:
-        - Model FLOPs are counted by the backend.
+        - Model FLOP are counted by the backend.
         - Loss and optimizer FLOP are counted dynamically by TorchTrainingHooks via UniversalFlopCounter.
         """
         if self._hooks is not None:
