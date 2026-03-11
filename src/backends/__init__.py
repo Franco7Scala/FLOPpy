@@ -5,15 +5,15 @@ from .base import BaseBackend
 
 def create_backend(model, backend: str, logger=None) -> BaseBackend:
     """
-    Factory con lazy import:
-    - non importa torch_backend / hf_backend a import-time
-    - sklearn funziona anche senza torch/transformers installati
-    - evita crash se torch_backend ha errori mentre stai testando sklearn
+    Factory with lazy import:
+    - Does not import torch_backend / hf_backend at import-time;
+    - Sklearn works even without torch/transformers installed;
+    - Prevents crashes if torch_backend has errors while testing sklearn.
     """
     backend = (backend or "auto").lower()
 
     # ---------- PyTorch ---------- #
-    if backend in ("torch", "auto"):
+    if backend in ("auto"):
         try:
             import torch
             from torch.nn import Module
@@ -25,7 +25,7 @@ def create_backend(model, backend: str, logger=None) -> BaseBackend:
                 raise
 
     # ---------- Sklearn ---------- #
-    if backend in ("sklearn", "auto"):
+    if backend in ("auto"):
         try:
             from sklearn.base import BaseEstimator
             if isinstance(model, BaseEstimator):
@@ -35,4 +35,4 @@ def create_backend(model, backend: str, logger=None) -> BaseBackend:
             if backend == "sklearn":
                 raise
 
-    raise ValueError(f"Impossibile determinare il backend per il modello: {type(model)} (backend={backend})")
+    raise ValueError(f"Unable to determine backend for model: {type(model)} (backend={backend})")
