@@ -7,7 +7,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 class UniversalFlopCounter(TorchDispatchMode):
     def __init__(self):
         super().__init__()
-        self.flop = 0
+        self.flops = 0
 
     def _get_numel(self, obj):
         if isinstance(obj, torch.Tensor):
@@ -28,26 +28,31 @@ class UniversalFlopCounter(TorchDispatchMode):
         # 1. OPTIMIZER: foreach / fused
         if "foreach" in func_str:
             if "addcdiv" in func_str or "addcmul" in func_str:
-                self.flop += in_elements * 3
+                self.flops += in_elements * 3
             else:
-                self.flop += in_elements
+                self.flops += in_elements
 
         elif "aten.addcdiv" in func_str or "aten.addcmul" in func_str:
-            self.flop += in_elements * 3
+            self.flops += in_elements * 3
 
-        # 2. ELEMENT-WISE OPERACTIONS
+        # 2. ELEMENT-WISE OPERATIONS
         elif any(
             func_str.startswith(f"aten.{op}")
-            for op in ["add", "sub", "mul", "div", "exp", "log", "pow", "neg", "abs", "relu", "sigmoid", "tanh"]
+            for op in [
+                "add", "sub", "mul", "div",
+                "exp", "log", "pow", "neg", "abs",
+                "relu", "sigmoid", "tanh",
+                "sqrt", "rsqrt"
+            ]
         ):
             elements = out_elements if out_elements > 0 else in_elements
-            self.flop += elements
+            self.flops += elements
 
         # 3. REDUCTIONS
         elif any(op in func_str for op in ["aten.sum", "aten.mean", "aten.max", "aten.min", "aten.norm", "aten.var"]):
-            self.flop += in_elements
+            self.flops += in_elements
             if "aten.mean" in func_str or "aten.var" in func_str:
-                self.flop += out_elements
+                self.flops += out_elements
 
         # 4. BASIC LINEAR ALGEBRA
         elif "aten.mm" in func_str or "aten.addmm" in func_str:
@@ -56,7 +61,7 @@ class UniversalFlopCounter(TorchDispatchMode):
             if isinstance(mat1, torch.Tensor) and isinstance(mat2, torch.Tensor) and mat1.dim() == 2:
                 m, k = mat1.shape
                 _, n = mat2.shape
-                self.flop += 2 * m * n * k
+                self.flops += 2 * m * n * k
 
         elif "aten.bmm" in func_str or "aten.baddbmm" in func_str:
             mat1 = args[1] if "baddbmm" in func_str else args[0]
@@ -64,7 +69,7 @@ class UniversalFlopCounter(TorchDispatchMode):
             if isinstance(mat1, torch.Tensor) and isinstance(mat2, torch.Tensor) and mat1.dim() == 3:
                 b, m, k = mat1.shape
                 _, _, n = mat2.shape
-                self.flop += 2 * b * m * n * k
+                self.flops += 2 * b * m * n * k
 
         elif "aten.matmul" in func_str:
             mat1, mat2 = args[0], args[1]
@@ -72,14 +77,14 @@ class UniversalFlopCounter(TorchDispatchMode):
                 m, k = mat1.shape[-2], mat1.shape[-1]
                 _, n = mat2.shape[-2], mat2.shape[-1]
                 batch_elements = mat1.numel() // (m * k)
-                self.flop += 2 * batch_elements * m * n * k
+                self.flops += 2 * batch_elements * m * n * k
 
         # 5. CONVOLUTIONS
         elif "aten.convolution" in func_str or "aten.conv" in func_str:
             weight_t = args[1]
             if isinstance(weight_t, torch.Tensor):
-                flop_per_element = 2 * (weight_t.numel() / weight_t.shape[0])
-                self.flop += int(out_elements * flop_per_element)
+                flops_per_element = 2 * (weight_t.numel() / weight_t.shape[0])
+                self.flops += int(out_elements * flops_per_element)
 
         # 6. ADVANCED LINEAR ALGEBRA
         elif "aten.inverse" in func_str or "aten.linalg_inv" in func_str:
@@ -87,16 +92,15 @@ class UniversalFlopCounter(TorchDispatchMode):
             if isinstance(mat, torch.Tensor) and mat.dim() >= 2:
                 n = mat.shape[-1]
                 batch_elements = mat.numel() // (n * n)
-                self.flop += batch_elements * 2 * (n ** 3)
+                self.flops += batch_elements * 2 * (n ** 3)
 
-        # 7. BACKEND LOSS STANDARD
+        # 7. STANDARD LOSS BACKEND OPS
         elif "aten._log_softmax" in func_str:
-            self.flop += in_elements * 3
+            self.flops += in_elements * 3
         elif "aten.nll_loss" in func_str:
-            self.flop += out_elements
+            self.flops += out_elements
 
         return out
-
 
 @dataclass
 class HookHandles:
@@ -127,7 +131,6 @@ class HookHandles:
             except Exception:
                 pass
 
-
 class TorchTrainingHooks:
     def __init__(self, tracker, *, enable_debug_print: bool = False):
         self.tracker = tracker
@@ -142,10 +145,6 @@ class TorchTrainingHooks:
         self._loss_forward_counter: Optional[UniversalFlopCounter] = None
         self._loss_backward_counter: Optional[UniversalFlopCounter] = None
         self._optimizer_counter: Optional[UniversalFlopCounter] = None
-
-        self._loss_forward_cm = None
-        self._loss_backward_cm = None
-        self._optimizer_cm = None
 
     # ------------------------------------------------------------
     # API
@@ -209,57 +208,51 @@ class TorchTrainingHooks:
 
     def _hook_loss_forward_pre(self, module, inputs) -> None:
         self._loss_forward_counter = UniversalFlopCounter()
-        self._loss_forward_cm = self._loss_forward_counter.__enter__()
+        self._loss_forward_counter.__enter__()
 
     def _hook_loss_forward(self, module, inputs, output) -> None:
         self.loss_forward_calls += 1
 
+        flop = 0
         try:
             if self._loss_forward_counter is not None:
                 self._loss_forward_counter.__exit__(None, None, None)
+                flop = int(self._loss_forward_counter.flops)
         except Exception:
-            pass
-
-        flop = 0
-        if self._loss_forward_counter is not None:
-            flop = int(self._loss_forward_counter.flop)
+            flop = 0
 
         if flop > 0:
             self.tracker._loss_forward_flop += flop
 
         self._loss_forward_counter = None
-        self._loss_forward_cm = None
 
         if self.enable_debug_print:
             print(f"[training_hooks] loss forward hook called | loss_forward_flop={flop}")
 
     # ------------------------------------------------------------
-    # LOSS BACKWARD
+    # LOSS BACKWARD 
     # ------------------------------------------------------------
 
     def _hook_loss_backward_pre(self, module, grad_output) -> None:
         self._loss_backward_counter = UniversalFlopCounter()
-        self._loss_backward_cm = self._loss_backward_counter.__enter__()
+        self._loss_backward_counter.__enter__()
 
     def _hook_loss_backward(self, module, grad_input, grad_output) -> None:
         self.loss_backward_calls += 1
         self.tracker._last_backward_seen = True
 
+        flop = 0
         try:
             if self._loss_backward_counter is not None:
                 self._loss_backward_counter.__exit__(None, None, None)
+                flop = int(self._loss_backward_counter.flops)
         except Exception:
-            pass
-
-        flop = 0
-        if self._loss_backward_counter is not None:
-            flop = int(self._loss_backward_counter.flop)
+            flop = 0
 
         if flop > 0:
             self.tracker._loss_backward_flop += flop
 
         self._loss_backward_counter = None
-        self._loss_backward_cm = None
 
         if self.enable_debug_print:
             print(f"[training_hooks] loss backward hook called | loss_backward_flop={flop}")
@@ -270,27 +263,24 @@ class TorchTrainingHooks:
 
     def _hook_optimizer_step_pre(self, optimizer, args, kwargs) -> None:
         self._optimizer_counter = UniversalFlopCounter()
-        self._optimizer_cm = self._optimizer_counter.__enter__()
+        self._optimizer_counter.__enter__()
 
     def _hook_optimizer_step_post(self, optimizer, args, kwargs) -> None:
         self.optimizer_step_calls += 1
         self.tracker._last_optimizer_step_seen = True
 
+        flop = 0
         try:
             if self._optimizer_counter is not None:
                 self._optimizer_counter.__exit__(None, None, None)
+                flop = int(self._optimizer_counter.flops)
         except Exception:
-            pass
-
-        flop = 0
-        if self._optimizer_counter is not None:
-            flop = int(self._optimizer_counter.flop)
+            flop = 0
 
         if flop > 0:
             self.tracker._optimizer_flop += flop
 
         self._optimizer_counter = None
-        self._optimizer_cm = None
 
         if self.enable_debug_print:
             print(f"[training_hooks] optimizer step post hook called | optimizer_flop={flop}")
