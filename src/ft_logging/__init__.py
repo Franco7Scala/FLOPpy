@@ -2,58 +2,51 @@ from __future__ import annotations
 from .csv_logger import CsvLogger
 from .wandb_logger import WandbLogger
 
-
-def create_logger(
-    log_per_batch: bool,
-    log_per_epoch: bool,
-    export_path: str | None,
-    use_wandb: bool,
-    wandb_project: str | None,
-    wandb_token: str | None,
-    run_name: str | None,
-):
-    loggers = []
-
-    if export_path is not None or log_per_batch or log_per_epoch:
-        loggers.append(
-            CsvLogger(
-                export_path=export_path,
-                log_per_batch=log_per_batch,
-                log_per_epoch=log_per_epoch,
-            )
-        )
-
-    if use_wandb:
-        loggers.append(
-            WandbLogger(
-                project=wandb_project,
-                token=wandb_token,
-                log_per_batch=log_per_batch,
-                log_per_epoch=log_per_epoch,
-                run_name=run_name,
-            )
-        )
-
-    if not loggers:
-        return None
-    if len(loggers) == 1:
-        return loggers[0]
-
-    return MultiplexLogger(loggers)
-
-
-class MultiplexLogger:
+class CompositeLogger:
     def __init__(self, loggers):
-        self.loggers = loggers
+        self.loggers = [l for l in loggers if l is not None]
 
-    def log_batch(self, *args, **kwargs):
-        for lg in self.loggers:
-            lg.log_batch(*args, **kwargs)
-
-    def log_epoch(self, *args, **kwargs):
-        for lg in self.loggers:
-            lg.log_epoch(*args, **kwargs)
+    def log_summary(self, summary: dict):
+        result = summary
+        for logger in self.loggers:
+            try:
+                result = logger.log_summary(summary)
+            except Exception:
+                pass
+        return result
 
     def close(self):
-        for lg in self.loggers:
-            lg.close()
+        for logger in self.loggers:
+            try:
+                logger.close()
+            except Exception:
+                pass
+
+def create_logger(
+    export_path: str | None = None,
+    use_wandb: bool = False,
+    wandb_project: str | None = None,
+    wandb_token: str | None = None,
+    run_name: str | None = None,
+):
+    csv_logger = CsvLogger(export_path=export_path) if export_path is not None else None
+    wandb_logger = (
+        WandbLogger(
+            use_wandb=use_wandb,
+            wandb_project=wandb_project,
+            wandb_token=wandb_token,
+            run_name=run_name,
+        )
+        if use_wandb
+        else None
+    )
+
+    active = [l for l in (csv_logger, wandb_logger) if l is not None]
+
+    if not active:
+        return None
+
+    if len(active) == 1:
+        return active[0]
+
+    return CompositeLogger(active)

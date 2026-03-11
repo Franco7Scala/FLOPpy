@@ -4,13 +4,11 @@ from typing import Any, Dict, Optional
 from torch.optim import Optimizer
 from backends.sklearn_backend import SklearnBackend
 
-
 @dataclass
 class FLOPpyReport:
     run_name: Optional[str]
     backend: str
 
-    # breakdown esplicito
     model_flop: int
     optimizer_flop: int
     loss_forward_flop: int
@@ -18,7 +16,6 @@ class FLOPpyReport:
     preproc_ops: int
     overall_flop: int
 
-    # logging / integrazioni
     export_path: Optional[str]
     use_wandb: bool
     wandb_project: Optional[str]
@@ -27,21 +24,6 @@ class FLOPpyReport:
 
 
 class FLOPpyTracker:
-    """
-    Facade hook-only.
-
-    Uso previsto:
-        with FLOPpyTracker(...).run(
-            model=model,
-            optimizer=optimizer,
-            loss_fn=loss_fn,
-            export_path="flop.csv"
-        ) as ft:
-            ... training loop ...
-
-    Il report viene stampato automaticamente a fine monitoraggio.
-    """
-
     def __init__(
         self,
         run_name: Optional[str] = None,
@@ -72,7 +54,7 @@ class FLOPpyTracker:
     def report(self) -> FLOPpyReport:
         if self._report is None:
             raise RuntimeError(
-                "Nessun report disponibile: esegui il training dentro il context manager prima di accedere a report."
+                "No report available: run training within the context manager before accessing 'report'."
             )
         return self._report
 
@@ -88,13 +70,6 @@ class FLOPpyTracker:
         wandb_token: Optional[str] = None,
         hooks_debug_print: bool = False,
     ) -> FLOPpyTracker:
-        """
-        Prepara il monitoraggio e restituisce self come context manager.
-
-        Esempio:
-            with FLOPpyTracker(...).run(model=model, optimizer=opt, loss_fn=loss_fn) as ft:
-                ... training loop ...
-        """
         self._model = model
         self._optimizer = optimizer
         self._loss_fn = loss_fn
@@ -103,16 +78,14 @@ class FLOPpyTracker:
         self._wandb_project = wandb_project
         self._wandb_token = wandb_token
         self._hooks_debug_print = hooks_debug_print
-
         return self
 
     def __enter__(self) -> FLOPpyTracker:
         from tracker import Tracker
 
         if self._model is None:
-            raise RuntimeError("run(...) deve essere chiamato prima di entrare nel context manager.")
+            raise RuntimeError("run(...) must be called before entering the context manager.")
 
-        # hardware info opzionale
         if self.print_hardware:
             try:
                 from hardware_info import get_hardware_info
@@ -134,7 +107,6 @@ class FLOPpyTracker:
 
         self._tracker.__enter__()
 
-        # sklearn non usa hook torch/loss/optimizer
         if not isinstance(self._tracker.backend, SklearnBackend):
             self._tracker.attach_torch_hooks(
                 model=self._model,
@@ -143,7 +115,6 @@ class FLOPpyTracker:
                 enable_debug_print=self._hooks_debug_print,
             )
 
-        # nome backend reale
         self._backend_name = self._tracker.backend.__class__.__name__.replace("Backend", "").lower()
 
         return self
@@ -186,21 +157,21 @@ class FLOPpyTracker:
         if rep.hardware is not None:
             print(f"[FLOPpyTracker{run_label}] Hardware: {rep.hardware}")
 
-        print(f"[FLOPpyTracker{run_label}] FLOP modello: {rep.model_flop}")
+        print(f"[FLOPpyTracker{run_label}] model FLOP: {rep.model_flop}")
 
         if rep.loss_forward_flop > 0:
-            print(f"[FLOPpyTracker{run_label}] FLOP loss forward: {rep.loss_forward_flop}")
+            print(f"[FLOPpyTracker{run_label}] loss forward FLOP: {rep.loss_forward_flop}")
 
         if rep.loss_backward_flop > 0:
-            print(f"[FLOPpyTracker{run_label}] FLOP loss backward: {rep.loss_backward_flop}")
+            print(f"[FLOPpyTracker{run_label}] loss backward FLOP: {rep.loss_backward_flop}")
 
         if rep.optimizer_flop > 0:
-            print(f"[FLOPpyTracker{run_label}] FLOP optimizer: {rep.optimizer_flop}")
+            print(f"[FLOPpyTracker{run_label}] optimizer FLOP : {rep.optimizer_flop}")
 
         if rep.preproc_ops > 0:
-            print(f"[FLOPpyTracker{run_label}] Ops preprocessing/tokenizer: {rep.preproc_ops}")
+            print(f"[FLOPpyTracker{run_label}] preprocessing/tokenizer Ops: {rep.preproc_ops}")
 
-        print(f"[FLOPpyTracker{run_label}] FLOP totale complessivo: {rep.overall_flop}")
+        print(f"[FLOPpyTracker{run_label}] overall FLOP: {rep.overall_flop}")
 
         if rep.export_path:
             print(f"[FLOPpyTracker{run_label}] Export CSV: {rep.export_path}")
