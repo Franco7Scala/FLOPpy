@@ -4,7 +4,8 @@ import torch
 
 class TokenizerWithOps:
     """
-   A wrapper for a tokenizer (typically HuggingFace) that estimates the cost of tokenization operations and accumulates it in an internal counter.
+   A wrapper for a tokenizer (typically HuggingFace) that estimates the cost of tokenization 
+   operations and accumulates it in an internal counter.
    Objective:
    - Does not calculate FLOP, but tracks a "cost" metric for the tokenizer.
    The default cost model is:
