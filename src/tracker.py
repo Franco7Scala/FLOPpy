@@ -6,6 +6,17 @@ from ft_logging import create_logger
 from training_hooks import TorchTrainingHooks
 
 class Tracker(AbstractContextManager):
+    """
+    Tracker hook-only.
+
+    Responsibilities:
+    - Initialize backend e logger
+    - Activate FLOP count of the model by backend
+    - Activate the training hook (loss/optimizer) by TorchTrainingHooks
+    - Maintains the final global counters
+    - Generates the final summary for loggers and reports
+    """
+
     def __init__(
         self,
         model,
@@ -26,19 +37,22 @@ class Tracker(AbstractContextManager):
 
         self.backend = create_backend(model, backend, logger=self.logger)
 
+        # Aggregate counters
         self._preproc_ops: int = 0
         self._loss_forward_flop: int = 0
         self._loss_backward_flop: int = 0
         self._optimizer_flop: int = 0
 
+        # training hooks
         self._hooks: Optional[TorchTrainingHooks] = None
 
+        # Internal state for debug / future extensibility
         self._last_model_output: Any = None
         self._last_backward_seen: bool = False
         self._last_optimizer_step_seen: bool = False
 
     # ------------------------------------------------------------
-    # Context manager
+    # Context manager 
     # ------------------------------------------------------------
 
     def __enter__(self):
@@ -67,12 +81,12 @@ class Tracker(AbstractContextManager):
         return False
 
     # ------------------------------------------------------------
-    # Metrics
+    # Final metrics
     # ------------------------------------------------------------
 
     @property
     def total_model_flop(self) -> int:
-        return self.backend.get_total_flop()
+        return int(self.backend.get_total_flop())
 
     @property
     def total_preproc_ops(self) -> int:
@@ -100,18 +114,18 @@ class Tracker(AbstractContextManager):
         )
 
     # ------------------------------------------------------------
-    # API preproc
+    # API preprocessing / tokenizer
     # ------------------------------------------------------------
 
     def add_preproc_ops(self, ops: int) -> None:
         if ops is None:
             return
-        v = int(ops)
-        if v > 0:
-            self._preproc_ops += v
+        value = int(ops)
+        if value > 0:
+            self._preproc_ops += value
 
     # ------------------------------------------------------------
-    # Hooks API
+    # API hooks (torch)
     # ------------------------------------------------------------
 
     def attach_torch_hooks(
@@ -121,6 +135,13 @@ class Tracker(AbstractContextManager):
         optimizer=None,
         enable_debug_print: bool = False,
     ) -> None:
+        """
+        Installs PyTorch hooks for loss and optimizer.
+        
+        Note:
+        - Model FLOPs are counted by the backend.
+        - Loss and optimizer FLOP are counted dynamically by TorchTrainingHooks via UniversalFlopCounter.
+        """
         if self._hooks is not None:
             try:
                 self._hooks.uninstall()
@@ -131,7 +152,7 @@ class Tracker(AbstractContextManager):
         self._hooks.install(model=model, loss_fn=loss_fn, optimizer=optimizer)
 
     # ------------------------------------------------------------
-    # Final summary 
+    # Final Summary 
     # ------------------------------------------------------------
 
     def build_summary_dict(self) -> Dict[str, int]:
@@ -142,139 +163,3 @@ class Tracker(AbstractContextManager):
             "total_loss_backward_flop": self.total_loss_backward_flop,
             "total_overall_flop": self.total_overall_flop,
         }
-
-    # ------------------------------------------------------------
-    # Utility loss FLOP
-    # ------------------------------------------------------------
-
-    def _extract_preds(self, outputs: Any):
-        try:
-            import torch
-        except Exception:
-            return None
-
-        if outputs is None:
-            return None
-
-        logits = getattr(outputs, "logits", None)
-        if isinstance(logits, torch.Tensor):
-            return logits
-
-        if isinstance(outputs, torch.Tensor):
-            return outputs
-
-        if isinstance(outputs, (tuple, list)):
-            for o in outputs:
-                if isinstance(o, torch.Tensor):
-                    return o
-
-        return None
-
-    def _estimate_loss_flop(
-        self,
-        loss: Any,
-        outputs: Any,
-        targets: Any,
-        extra: Optional[Dict[str, Any]] = None,
-    ) -> int:
-        try:
-            import torch
-            import torch.nn as nn
-        except Exception:
-            return 0
-
-        preds = self._extract_preds(outputs)
-        if not isinstance(preds, torch.Tensor):
-            return 0
-
-        loss_type = None
-        if extra and isinstance(extra, dict):
-            lt = extra.get("loss_type", None)
-            if isinstance(lt, str):
-                loss_type = lt.lower().strip()
-
-        if loss_type is None and loss is not None:
-            if isinstance(loss, nn.CrossEntropyLoss):
-                loss_type = "cross_entropy"
-            elif isinstance(loss, nn.MSELoss):
-                loss_type = "mse"
-            elif isinstance(loss, nn.L1Loss):
-                loss_type = "l1"
-            elif isinstance(loss, nn.BCELoss):
-                loss_type = "bce"
-            elif isinstance(loss, nn.BCEWithLogitsLoss):
-                loss_type = "bce_logits"
-            elif isinstance(loss, nn.KLDivLoss):
-                loss_type = "kl"
-
-        if loss_type is None and isinstance(targets, torch.Tensor):
-            if targets.dtype in (torch.int64, torch.int32, torch.int16, torch.int8):
-                if preds.dim() >= 2 and preds.shape[-1] > 1:
-                    loss_type = "cross_entropy"
-            if loss_type is None and targets.dtype.is_floating_point:
-                if preds.shape == targets.shape:
-                    loss_type = "mse"
-
-        if loss_type == "cross_entropy":
-            if preds.dim() == 2:
-                b, c = int(preds.shape[0]), int(preds.shape[1])
-                return max(0, b * (3 * c + 2) + (b - 1))
-            if preds.dim() == 3:
-                b, t, c = int(preds.shape[0]), int(preds.shape[1]), int(preds.shape[2])
-                n = b * t
-                return max(0, n * (3 * c + 2) + (n - 1))
-            return 0
-
-        if loss_type == "mse":
-            n = int(preds.numel())
-            return max(0, 2 * n + (n - 1))
-
-        if loss_type == "l1":
-            n = int(preds.numel())
-            return max(0, 2 * n + (n - 1))
-
-        if loss_type == "bce":
-            n = int(preds.numel())
-            return max(0, 6 * n + (n - 1))
-
-        if loss_type in ("bce_logits", "bcewithlogits"):
-            n = int(preds.numel())
-            return max(0, 10 * n + (n - 1))
-
-        if loss_type == "kl":
-            n = int(preds.numel())
-            return max(0, 3 * n + (n - 1))
-
-        return 0
-
-    def _estimate_loss_backward_flop(
-        self,
-        loss: Any,
-        outputs: Any,
-        targets: Any,
-        extra: Optional[Dict[str, Any]] = None,
-    ) -> int:
-        return self._estimate_loss_flop(loss=loss, outputs=outputs, targets=targets, extra=extra)
-
-    def _estimate_optimizer_flop(self, optimizer) -> int:
-        try:
-            import torch.optim as optim
-        except Exception:
-            return 0
-
-        n_params = 0
-        for group in optimizer.param_groups:
-            for p in group["params"]:
-                if p is not None and hasattr(p, "numel"):
-                    n_params += int(p.numel())
-
-        if isinstance(optimizer, optim.SGD):
-            return 2 * n_params
-
-        if isinstance(optimizer, (optim.Adam, optim.AdamW)):
-            return 10 * n_params
-
-        if isinstance(optimizer, optim.RMSprop):
-            return 8 * n_params
-
-        return 4 * n_params
