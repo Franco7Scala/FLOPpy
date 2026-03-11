@@ -10,8 +10,6 @@ class Tracker(AbstractContextManager):
         self,
         model,
         backend: str = "auto",
-        log_per_batch: bool = False,
-        log_per_epoch: bool = False,
         export_path: Optional[str] = None,
         use_wandb: bool = False,
         wandb_project: Optional[str] = None,
@@ -19,8 +17,6 @@ class Tracker(AbstractContextManager):
         run_name: Optional[str] = None,
     ):
         self.logger = create_logger(
-            log_per_batch=log_per_batch,
-            log_per_epoch=log_per_epoch,
             export_path=export_path,
             use_wandb=use_wandb,
             wandb_project=wandb_project,
@@ -31,12 +27,10 @@ class Tracker(AbstractContextManager):
         self.backend = create_backend(model, backend, logger=self.logger)
 
         self._preproc_ops: int = 0
-
         self._loss_forward_flop: int = 0
         self._loss_backward_flop: int = 0
         self._optimizer_flop: int = 0
 
-        self._epoch_idx: int = 0
         self._hooks: Optional[TorchTrainingHooks] = None
 
         self._last_model_output: Any = None
@@ -61,7 +55,6 @@ class Tracker(AbstractContextManager):
 
         self.backend.stop()
 
-        # final summary csv logger 
         if self.logger is not None and hasattr(self.logger, "log_summary"):
             try:
                 self.logger.log_summary(self.build_summary_dict())
@@ -74,7 +67,7 @@ class Tracker(AbstractContextManager):
         return False
 
     # ------------------------------------------------------------
-    # Metriche
+    # Metrics
     # ------------------------------------------------------------
 
     @property
@@ -118,23 +111,6 @@ class Tracker(AbstractContextManager):
             self._preproc_ops += v
 
     # ------------------------------------------------------------
-    # Epoch helpers
-    # ------------------------------------------------------------
-
-    def set_epoch(self, epoch: int) -> None:
-        self._epoch_idx = int(epoch)
-        if hasattr(self.backend, "set_epoch"):
-            self.backend.set_epoch(self._epoch_idx)
-
-    def log_epoch(self) -> None:
-        if self.logger is not None and hasattr(self.logger, "log_epoch"):
-            self.logger.log_epoch(
-                epoch=int(self._epoch_idx),
-                flop=self.total_model_flop,
-                cumulative_flop=self.total_model_flop,
-            )
-
-    # ------------------------------------------------------------
     # Hooks API
     # ------------------------------------------------------------
 
@@ -155,7 +131,7 @@ class Tracker(AbstractContextManager):
         self._hooks.install(model=model, loss_fn=loss_fn, optimizer=optimizer)
 
     # ------------------------------------------------------------
-    # Summary finale
+    # Final summary 
     # ------------------------------------------------------------
 
     def build_summary_dict(self) -> Dict[str, int]:
@@ -168,7 +144,7 @@ class Tracker(AbstractContextManager):
         }
 
     # ------------------------------------------------------------
-    # Utility per loss FLOPs
+    # Utility loss FLOP
     # ------------------------------------------------------------
 
     def _extract_preds(self, outputs: Any):
@@ -281,9 +257,6 @@ class Tracker(AbstractContextManager):
         return self._estimate_loss_flop(loss=loss, outputs=outputs, targets=targets, extra=extra)
 
     def _estimate_optimizer_flop(self, optimizer) -> int:
-        """
-        Stima dei FLOP di update dell'optimizer.
-        """
         try:
             import torch.optim as optim
         except Exception:
