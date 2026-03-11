@@ -3,14 +3,14 @@ from __future__ import annotations
 from .base import BaseBackend
 
 
-def create_backend(model, backend: str, logger=None) -> BaseBackend:
+def create_backend(model, logger=None) -> BaseBackend:
     """
     Factory with lazy import:
     - Does not import torch_backend / hf_backend at import-time;
     - Sklearn works even without torch/transformers installed;
     - Prevents crashes if torch_backend has errors while testing sklearn.
     """
-    backend = (backend or "auto").lower()
+    backend = ("auto").lower()
 
     # ---------- PyTorch ---------- #
     if backend in ("auto"):
