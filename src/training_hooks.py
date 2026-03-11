@@ -1,8 +1,6 @@
 from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any, Optional
-
 
 @dataclass
 class HookHandles:
@@ -24,36 +22,22 @@ class HookHandles:
             except Exception:
                 pass
 
-
 class TorchTrainingHooks:
-    """
-    Hook manager per training PyTorch.
-
-    Obiettivi:
-    - contare i FLOP della loss nel suo forward
-    - osservare backward della loss e step dell'optimizer
-    - mantenere il comportamento "trasparente" per l'utente
-    """
-
     def __init__(self, tracker, *, enable_debug_print: bool = False):
         self.tracker = tracker
         self.enable_debug_print = enable_debug_print
         self.handles = HookHandles()
 
-        # contatori per debug / diagnostica
-        self.model_forward_calls: int = 0
-        self.loss_forward_calls: int = 0
-        self.loss_backward_calls: int = 0
-        self.optimizer_step_calls: int = 0
+        self.model_forward_calls = 0
+        self.loss_forward_calls = 0
+        self.loss_backward_calls = 0
+        self.optimizer_step_calls = 0
 
-    # ------------------------------------------------------------
-    # API pubblica
-    # ------------------------------------------------------------
+        self._last_loss_module = None
+        self._last_loss_preds = None
+        self._last_loss_targets = None
 
     def install(self, *, model, loss_fn=None, optimizer=None) -> None:
-        """
-        Installa gli hook su modello, loss e optimizer.
-        """
         try:
             self.handles.model_fwd_handle = model.register_forward_hook(self._hook_model_forward)
         except Exception:
@@ -80,57 +64,28 @@ class TorchTrainingHooks:
         self.handles.remove_all()
 
     # ------------------------------------------------------------
-    # HOOKS
+    # Hooks
     # ------------------------------------------------------------
 
     def _hook_model_forward(self, module, inputs, output) -> None:
-        """
-        Hook chiamato dopo il forward del modello.
-
-        Nota:
-        - NON aggiunge FLOP, i FLOP del modello sono già
-          conteggiati dal backend tramite i forward hook sui layer.
-        - Serve a marcare il passaggio del forward e a mantenere
-          uno stato coerente del training.
-        """
         self.model_forward_calls += 1
-
-        # stato  per debug/report
-        if hasattr(self.tracker, "_last_model_output"):
-            self.tracker._last_model_output = output
-        else:
-            try:
-                self.tracker._last_model_output = output
-            except Exception:
-                pass
+        self.tracker._last_model_output = output
 
         if self.enable_debug_print:
             print("[training_hooks] model forward hook called")
 
     def _hook_loss_forward(self, module, inputs, output) -> None:
-        """
-        Hook chiamato dopo il forward della loss.
-
-        inputs tipicamente:
-            inputs[0] = preds / logits
-            inputs[1] = targets
-
-        output:
-            tensore scalare della loss
-
-        Stima dei FLOP della loss e aggiunti al batch corrente
-        tramite backend.add_extra_flop(...).
-        """
         self.loss_forward_calls += 1
 
         preds = inputs[0] if isinstance(inputs, (tuple, list)) and len(inputs) > 0 else None
         targets = inputs[1] if isinstance(inputs, (tuple, list)) and len(inputs) > 1 else None
 
+        self._last_loss_module = module
+        self._last_loss_preds = preds
+        self._last_loss_targets = targets
+
         flop = 0
         try:
-            # supporta sia una firma tipo:
-            # _estimate_loss_flop(loss=..., outputs=..., targets=..., extra=None)
-            # sia eventuali versioni più semplici
             flop = int(
                 self.tracker._estimate_loss_flop(
                     loss=module,
@@ -139,58 +94,50 @@ class TorchTrainingHooks:
                     extra=None,
                 )
             )
-        except TypeError:
-            try:
-                flop = int(self.tracker._estimate_loss_flop(module, preds, targets))
-            except Exception:
-                flop = 0
         except Exception:
             flop = 0
 
         if flop > 0:
-            # aggiorna breakdown loss
-            if hasattr(self.tracker, "_loss_flop"):
-                self.tracker._loss_flop += flop
-
-            # aggiunge i FLOP della loss al batch corrente
-            if hasattr(self.tracker, "backend") and hasattr(self.tracker.backend, "add_extra_flop"):
-                self.tracker.backend.add_extra_flop(flop)
+            self.tracker._loss_forward_flop += flop
 
         if self.enable_debug_print:
             print(f"[training_hooks] loss forward hook called | loss_flop={flop}")
 
     def _hook_loss_backward(self, module, grad_input, grad_output) -> None:
-        """
-        Hook chiamato durante il backward della loss.
-
-        """
         self.loss_backward_calls += 1
+        self.tracker._last_backward_seen = True
 
-        if hasattr(self.tracker, "_last_backward_seen"):
-            self.tracker._last_backward_seen = True
-        else:
-            try:
-                self.tracker._last_backward_seen = True
-            except Exception:
-                pass
+        flop = 0
+        try:
+            flop = int(
+                self.tracker._estimate_loss_backward_flop(
+                    loss=self._last_loss_module,
+                    outputs=self._last_loss_preds,
+                    targets=self._last_loss_targets,
+                    extra=None,
+                )
+            )
+        except Exception:
+            flop = 0
+
+        if flop > 0:
+            self.tracker._loss_backward_flop += flop
 
         if self.enable_debug_print:
-            print("[training_hooks] loss backward hook called")
+            print(f"[training_hooks] loss backward hook called | loss_bwd_flop={flop}")
 
     def _hook_optimizer_step_post(self, optimizer, args, kwargs) -> None:
-        """
-        Hook chiamato dopo optimizer.step().
-
-        """
         self.optimizer_step_calls += 1
+        self.tracker._last_optimizer_step_seen = True
 
-        if hasattr(self.tracker, "_last_optimizer_step_seen"):
-            self.tracker._last_optimizer_step_seen = True
-        else:
-            try:
-                self.tracker._last_optimizer_step_seen = True
-            except Exception:
-                pass
+        flop = 0
+        try:
+            flop = int(self.tracker._estimate_optimizer_flop(optimizer))
+        except Exception:
+            flop = 0
+
+        if flop > 0:
+            self.tracker._optimizer_flop += flop
 
         if self.enable_debug_print:
-            print("[training_hooks] optimizer step post hook called")
+            print(f"[training_hooks] optimizer step post hook called | opt_flop={flop}")
