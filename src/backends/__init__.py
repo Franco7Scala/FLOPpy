@@ -1,38 +1,45 @@
 from __future__ import annotations
-
 from .base import BaseBackend
 
+def create_backend(model, backend: str = "auto", logger=None) -> BaseBackend:
+    """
+    Backend factory with lazy imports.
 
-def create_backend(model, logger=None) -> BaseBackend:
+    Goals:
+    - avoid importing torch/sklearn backend modules at import-time
+    - keep the library lightweight and robust
+    - support backend auto-detection
     """
-    Factory with lazy import:
-    - Does not import torch_backend / hf_backend at import-time;
-    - Sklearn works even without torch/transformers installed;
-    - Prevents crashes if torch_backend has errors while testing sklearn.
-    """
-    backend = ("auto").lower()
+
+    backend = (backend or "auto").lower()
 
     # ---------- PyTorch ---------- #
-    if backend in ("auto"):
+    if backend in ("auto", "torch"):
         try:
             import torch
             from torch.nn import Module
+
             if isinstance(model, Module):
-                from .torch_backend import TorchBackend  # lazy import
+                from .torch_backend import TorchBackend
                 return TorchBackend(model, logger=logger)
+
         except ImportError:
             if backend == "torch":
                 raise
 
-    # ---------- Sklearn ---------- #
-    if backend in ("auto"):
+    # ---------- Scikit-learn ---------- #
+    if backend in ("auto", "sklearn"):
         try:
             from sklearn.base import BaseEstimator
+
             if isinstance(model, BaseEstimator):
-                from .sklearn_backend import SklearnBackend  # lazy import
+                from .sklearn_backend import SklearnBackend
                 return SklearnBackend(model, logger=logger)
+
         except ImportError:
             if backend == "sklearn":
                 raise
 
-    raise ValueError(f"Unable to determine backend for model: {type(model)} (backend={backend})")
+    raise ValueError(
+        f"Unable to determine backend for model type {type(model)} with backend='{backend}'."
+    )
