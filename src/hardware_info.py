@@ -1,12 +1,10 @@
+from __future__ import annotations
 import platform
 import sys
-import psutil
-import torch
-
-from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, Optional
-
+import psutil
+import torch
 
 @dataclass
 class HardwareInfo:
@@ -55,10 +53,14 @@ def get_hardware_info() -> HardwareInfo:
     if torch is not None:
         torch_ver = getattr(torch, "__version__", None)
         cuda_avail = bool(torch.cuda.is_available())
+
         if cuda_avail:
             gpu_count = int(torch.cuda.device_count())
-            gpu_name = torch.cuda.get_device_name(0) if gpu_count and gpu_count > 0 else None
-
+            gpu_name = (
+                torch.cuda.get_device_name(0)
+                if gpu_count and gpu_count > 0
+                else None
+            )
 
     return HardwareInfo(
         os=os_name,
@@ -81,6 +83,7 @@ def format_hardware_info(hw: HardwareInfo) -> str:
         f"OS: {hw.os} ({hw.machine})",
         f"Python: {hw.python_version}",
     ]
+
     if hw.torch_version:
         parts.append(f"PyTorch: {hw.torch_version}")
 
@@ -88,6 +91,7 @@ def format_hardware_info(hw: HardwareInfo) -> str:
         parts.append(
             f"CPU cores: logical={hw.cpu_cores_logical}, physical={hw.cpu_cores_physical}"
         )
+
     if hw.ram_total_gb is not None:
         parts.append(f"RAM: {hw.ram_total_gb} GB")
 
