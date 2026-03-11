@@ -1,18 +1,13 @@
 from __future__ import annotations
-
 from typing import Any, Callable, Optional
-
 import numpy as np
-
 from .base import BaseBackend
 
 
 class SklearnBackend(BaseBackend):
     """
-    Backend per modelli scikit-learn.
-    - Ogni chiamata conta i FLOP in base al tipo di modello + shape di X.
-    - Ogni chiamata viene trattata come un "batch" nei log.
-    - Supporta FLOP extra (loss/preproc) via add_extra_flop().
+    Backend for scikit-learn models. 
+    Each call calculates FLOPs based on model type and the shape of X.
     """
 
     def __init__(self, model, logger=None):
@@ -22,9 +17,6 @@ class SklearnBackend(BaseBackend):
         self._orig_predict: Optional[Callable] = None
         self._orig_predict_proba: Optional[Callable] = None
         self._orig_transform: Optional[Callable] = None
-
-        # FLOP esterni da accumulare nella prossima call
-        self._pending_extra_flop: int = 0
 
     # ---------------- START / STOP ---------------- #
 
@@ -55,24 +47,7 @@ class SklearnBackend(BaseBackend):
         if self._orig_transform is not None:
             self.model.transform = self._orig_transform
 
-    # ---------------- EXTRA FLOP ---------------- #
-
-    def add_extra_flop(self, flop: int) -> None:
-        """
-        Aggiunge FLOP esterni (loss/preproc) alla prossima call (fit/predict/transform).
-        """
-        if flop is None:
-            return
-        v = int(flop)
-        if v > 0:
-            self._pending_extra_flop += v
-
-    def _consume_extra(self) -> int:
-        v = int(self._pending_extra_flop)
-        self._pending_extra_flop = 0
-        return v
-
-    # ---------------- WRAPPER METODI ---------------- #
+    # ---------------- METHOD WRAPPERS ---------------- #
 
     def _wrap_fit(self, fn: Callable) -> Callable:
         def wrapped(X, y=None, *args, **kwargs):
@@ -99,7 +74,6 @@ class SklearnBackend(BaseBackend):
         def wrapped(X, *args, **kwargs):
             X_arr = np.asarray(X)
             proba = fn(X, *args, **kwargs)
-            # per semplicità uso la stessa stima di predict 
             flop = self._estimate_predict_flop(X_arr, np.asarray(proba))
             flop += self._consume_extra()
             self._accumulate_call(flop)
@@ -118,7 +92,7 @@ class SklearnBackend(BaseBackend):
 
         return wrapped
 
-    # ---------------- ACCUMULO E LOG ---------------- #
+    # ---------------- ACCUMULATION & LOGS ---------------- #
 
     def _accumulate_call(self, flop: int):
         self._last_batch_flop = int(flop)
@@ -133,7 +107,7 @@ class SklearnBackend(BaseBackend):
                 epoch=self._epoch_idx,
             )
 
-    # ---------------- STIME FLOP ---------------- #
+    # ---------------- FLOP ESTIMATION ---------------- #
 
     def _estimate_fit_flop(self, X: np.ndarray, y: Any) -> int:
         return 0
@@ -150,12 +124,12 @@ class SklearnBackend(BaseBackend):
 
         m = self.model
 
-        # Lineari / logreg: XW + b
+        # Linear / logreg: XW + b
         if isinstance(m, (LinearRegression, Ridge, Lasso, LogisticRegression)):
             flop = 2 * n_features * n_outputs * n_samples
             return int(flop)
 
-        # KNN brute force: distanze vs training
+        # KNN brute force
         if isinstance(m, (KNeighborsClassifier, KNeighborsRegressor)):
             n_train = getattr(m, "n_samples_fit_", None)
             if n_train is None and hasattr(m, "_fit_X"):
