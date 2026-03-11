@@ -1,167 +1,161 @@
 from __future__ import annotations
 import torch
 import torch.nn as nn
-
 from .base import BaseBackend
-
 
 class TorchBackend(BaseBackend):
     """
     Backend for PyTorch models.
-    - Handles DataParallel / DDP by accessing .module.
-    - Counts FLOPs for:
+
+    Responsibilities:
+    - handles DataParallel / DDP via .module
+    - counts ONLY model FLOP
+
+    Supported layer families:
         * Conv1d / Conv2d / Conv3d
         * ConvTranspose1d / 2d / 3d
         * Linear
         * Pooling (Max/Avg/Adaptive)
-        * Normalization (BatchNorm, LayerNorm, GroupNorm, InstanceNorm)
-        * RMSNorm
-        * Activations: ReLU, LeakyReLU, PReLU, Sigmoid, Tanh
-        * Softmax family: Softmax, Softmin, Softmax2d, LogSoftmax
+        * Normalization (BatchNorm, LayerNorm, GroupNorm, InstanceNorm, RMSNorm)
+        * Activations (ReLU, LeakyReLU, PReLU, Sigmoid, Tanh)
+        * Softmax family
         * RNN / LSTM / GRU
         * RNNCell / LSTMCell / GRUCell
         * MultiheadAttention
         * Embedding / EmbeddingBag
-        * Transformer 
-        * DataParallel
+        * Transformer containers (counted through submodules)
     """
 
     def __init__(self, model: nn.Module, logger=None):
-        # DataParallel / DDP
         if isinstance(model, (nn.DataParallel, torch.nn.parallel.DistributedDataParallel)):
             model = model.module
 
         super().__init__(model, logger=logger)
         self._layer_handles: list[torch.utils.hooks.RemovableHandle] = []
         self._root_handles: list[torch.utils.hooks.RemovableHandle] = []
-        self._current_batch_flop: int = 0
+        self._current_forward_flop: int = 0
 
-    # ---------------- START / STOP ---------------- #
+    # ------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------
 
     def start(self):
-        # Hooks on layers to be tracked
+        tracked_types = (
+            # Convolutions / Linear
+            nn.Conv1d,
+            nn.Conv2d,
+            nn.Conv3d,
+            nn.ConvTranspose1d,
+            nn.ConvTranspose2d,
+            nn.ConvTranspose3d,
+            nn.Linear,
+
+            # Pooling
+            nn.MaxPool1d,
+            nn.MaxPool2d,
+            nn.MaxPool3d,
+            nn.AvgPool1d,
+            nn.AvgPool2d,
+            nn.AvgPool3d,
+            nn.AdaptiveAvgPool1d,
+            nn.AdaptiveAvgPool2d,
+            nn.AdaptiveAvgPool3d,
+            nn.AdaptiveMaxPool1d,
+            nn.AdaptiveMaxPool2d,
+            nn.AdaptiveMaxPool3d,
+
+            # Normalization
+            nn.BatchNorm1d,
+            nn.BatchNorm2d,
+            nn.BatchNorm3d,
+            nn.LayerNorm,
+            nn.GroupNorm,
+            nn.InstanceNorm1d,
+            nn.InstanceNorm2d,
+            nn.InstanceNorm3d,
+
+            # Activations
+            nn.ReLU,
+            nn.LeakyReLU,
+            nn.PReLU,
+            nn.Sigmoid,
+            nn.Tanh,
+
+            # Softmax family
+            nn.Softmax,
+            nn.Softmin,
+            nn.Softmax2d,
+            nn.LogSoftmax,
+
+            # RNN family
+            nn.RNN,
+            nn.LSTM,
+            nn.GRU,
+            nn.RNNCell,
+            nn.LSTMCell,
+            nn.GRUCell,
+
+            # Attention / Embeddings
+            nn.MultiheadAttention,
+            nn.Embedding,
+            nn.EmbeddingBag,
+
+            # Transformer high-level containers
+            nn.Transformer,
+            nn.TransformerEncoder,
+            nn.TransformerDecoder,
+            nn.TransformerEncoderLayer,
+            nn.TransformerDecoderLayer,
+
+            # Wrapper
+            nn.DataParallel,
+        )
+
         for module in self.model.modules():
-            if isinstance(
-                module,
-                (
-                    # --- Convolutions / Linear ---
-                    nn.Conv1d,
-                    nn.Conv2d,
-                    nn.Conv3d,
-                    nn.ConvTranspose1d,
-                    nn.ConvTranspose2d,
-                    nn.ConvTranspose3d,
-                    nn.Linear,
+            if isinstance(module, tracked_types):
+                handle = module.register_forward_hook(self._layer_hook)
+                self._layer_handles.append(handle)
 
-                    # --- Pooling ---
-                    nn.MaxPool1d,
-                    nn.MaxPool2d,
-                    nn.MaxPool3d,
-                    nn.AvgPool1d,
-                    nn.AvgPool2d,
-                    nn.AvgPool3d,
-                    nn.AdaptiveAvgPool1d,
-                    nn.AdaptiveAvgPool2d,
-                    nn.AdaptiveAvgPool3d,
-                    nn.AdaptiveMaxPool1d,
-                    nn.AdaptiveMaxPool2d,
-                    nn.AdaptiveMaxPool3d,
-
-                    # --- Normalization ---
-                    nn.BatchNorm1d,
-                    nn.BatchNorm2d,
-                    nn.BatchNorm3d,
-                    nn.LayerNorm,
-                    nn.GroupNorm,
-                    nn.InstanceNorm1d,
-                    nn.InstanceNorm2d,
-                    nn.InstanceNorm3d,
-
-                    # --- Activations ---
-                    nn.ReLU,
-                    nn.LeakyReLU,
-                    nn.PReLU,
-                    nn.Sigmoid,
-                    nn.Tanh,
-
-                    # --- Softmax family ---
-                    nn.Softmax,
-                    nn.Softmin,
-                    nn.Softmax2d,
-                    nn.LogSoftmax,
-
-                    # --- RNN family ---
-                    nn.RNN,
-                    nn.LSTM,
-                    nn.GRU,
-                    nn.RNNCell,
-                    nn.LSTMCell,
-                    nn.GRUCell,
-
-                    # --- Attention / Embeddings ---
-                    nn.MultiheadAttention,
-                    nn.Embedding,
-                    nn.EmbeddingBag,
-
-                    # --- Transformer high-level containers ---
-                    nn.Transformer,
-                    nn.TransformerEncoder,
-                    nn.TransformerDecoder,
-                    nn.TransformerEncoderLayer,
-                    nn.TransformerDecoderLayer,
-
-                    # --- DataParallel wrapper  ---
-                    nn.DataParallel,
-                ),
-            ):
-                h = module.register_forward_hook(self._layer_hook)
-                self._layer_handles.append(h)
-
-        # RMSNorm
+        # RMSNorm (if available in current torch version)
         if hasattr(nn, "RMSNorm"):
             for module in self.model.modules():
                 if isinstance(module, nn.RMSNorm):
-                    h = module.register_forward_hook(self._layer_hook)
-                    self._layer_handles.append(h)
+                    handle = module.register_forward_hook(self._layer_hook)
+                    self._layer_handles.append(handle)
 
-        # Root model hook to identify batch start/end
-        pre_h = self.model.register_forward_pre_hook(self._on_batch_start)
-        post_h = self.model.register_forward_hook(self._on_batch_end)
-        self._root_handles.extend([pre_h, post_h])
+        # root hooks to delimit one model forward
+        pre_handle = self.model.register_forward_pre_hook(self._on_forward_start)
+        post_handle = self.model.register_forward_hook(self._on_forward_end)
+        self._root_handles.extend([pre_handle, post_handle])
 
     def stop(self):
-        for h in self._layer_handles:
-            h.remove()
-        for h in self._root_handles:
-            h.remove()
+        for handle in self._layer_handles:
+            handle.remove()
+        for handle in self._root_handles:
+            handle.remove()
+
         self._layer_handles.clear()
         self._root_handles.clear()
-        
 
-    # ---------------- BATCH HOOK  ---------------- #
+    # ------------------------------------------------------------
+    # Root forward hooks
+    # ------------------------------------------------------------
 
-    def _on_batch_start(self, module, input):
-        self._current_batch_flop = 0
+    def _on_forward_start(self, module, inputs):
+        self._current_forward_flop = 0
 
-    def _on_batch_end(self, module, input, output):
-        batch_flop = self._current_batch_flop
-        self._last_batch_flop = batch_flop
-        self.total_flop += batch_flop
+    def _on_forward_end(self, module, inputs, output):
+        forward_flop = int(self._current_forward_flop)
+        self._last_batch_flop = forward_flop
+        self.total_flop += forward_flop
         self._batch_idx += 1
 
-        if self.logger is not None and hasattr(self.logger, "log_batch"):
-            self.logger.log_batch(
-                step=self._batch_idx,
-                flop=batch_flop,
-                cumulative_flop=self.total_flop,
-                epoch=self._epoch_idx,
-            )
+    # ------------------------------------------------------------
+    # Layer hook 
+    # ------------------------------------------------------------
 
-    # ---------------- LAYER HOOK ---------------- #
-
-    def _layer_hook(self, layer, input, output):
-        # some layer have not trivial input/output 
-        x = input[0] if isinstance(input, (tuple, list)) and len(input) > 0 else None
+    def _layer_hook(self, layer, inputs, output):
+        x = inputs[0] if isinstance(inputs, (tuple, list)) and len(inputs) > 0 else None
         y = output
 
         if isinstance(y, (tuple, list)):
@@ -197,129 +191,140 @@ class TorchBackend(BaseBackend):
 
         # --- NORMALIZATION --- #
         elif isinstance(layer, (nn.BatchNorm1d, nn.BatchNorm2d, nn.BatchNorm3d)):
-            flop = self._batchnorm_flop(layer, x, y)
+            flop = self._batchnorm_flop(y)
         elif isinstance(layer, nn.LayerNorm):
-            flop = self._layernorm_flop(layer, x, y)
+            flop = self._layernorm_flop(y)
         elif isinstance(layer, nn.GroupNorm):
-            flop = self._groupnorm_flop(layer, x, y)
+            flop = self._groupnorm_flop(y)
         elif isinstance(layer, (nn.InstanceNorm1d, nn.InstanceNorm2d, nn.InstanceNorm3d)):
-            flop = self._instancenorm_flop(layer, x, y)
+            flop = self._instancenorm_flop(y)
         elif hasattr(nn, "RMSNorm") and isinstance(layer, nn.RMSNorm):
-            flop = self._rmsnorm_flop(layer, x, y)
+            flop = self._rmsnorm_flop(layer, y)
 
         # --- ACTIVATIONS --- #
         elif isinstance(layer, nn.ReLU):
-            flop = self._relu_flop(x, y)
+            flop = self._relu_flop(y)
         elif isinstance(layer, nn.LeakyReLU):
-            flop = self._leakyrelu_flop(x, y)
+            flop = self._leakyrelu_flop(y)
         elif isinstance(layer, nn.PReLU):
-            flop = self._prelu_flop(x, y)
+            flop = self._prelu_flop(y)
         elif isinstance(layer, nn.Sigmoid):
-            flop = self._sigmoid_flop(x, y)
+            flop = self._sigmoid_flop(y)
         elif isinstance(layer, nn.Tanh):
-            flop = self._tanh_flop(x, y)
+            flop = self._tanh_flop(y)
 
         # --- SOFTMAX FAMILY --- #
         elif isinstance(layer, (nn.Softmax, nn.Softmin, nn.Softmax2d, nn.LogSoftmax)):
-            flop = self._softmax_family_flop(layer, x, y)
+            flop = self._softmax_family_flop(layer, y)
 
         # --- RNN / LSTM / GRU --- #
         elif isinstance(layer, (nn.RNN, nn.LSTM, nn.GRU)):
-            flop = self._rnn_flop(layer, x, output)
+            flop = self._rnn_flop(layer, x)
 
         # --- RNN CELLS --- #
         elif isinstance(layer, nn.RNNCell):
-            flop = self._rnncell_flop(layer, input, y)
+            flop = self._rnncell_flop(layer, inputs)
         elif isinstance(layer, nn.LSTMCell):
-            flop = self._lstmcell_flop(layer, input, output)
+            flop = self._lstmcell_flop(layer, inputs)
         elif isinstance(layer, nn.GRUCell):
-            flop = self._grucell_flop(layer, input, y)
+            flop = self._grucell_flop(layer, inputs)
 
         # --- MULTIHEAD ATTENTION --- #
         elif isinstance(layer, nn.MultiheadAttention):
-            flop = self._mha_flop(layer, input, output)
+            flop = self._mha_flop(layer, inputs)
 
         # --- EMBEDDING --- #
         elif isinstance(layer, nn.Embedding):
-            flop = self._embedding_flop(layer, x, y)
+            flop = self._embedding_flop(layer, x)
         elif isinstance(layer, nn.EmbeddingBag):
-            flop = self._embeddingbag_flop(layer, x, y)
+            flop = self._embeddingbag_flop(layer, x)
 
-        # --- TRANSFORMER CONTAINERS / DATAPARALLEL WRAPPER --- #
-        # sono container, si contano i sotto-moduli già hookati
-        elif isinstance(layer, (nn.Transformer, nn.TransformerEncoder, nn.TransformerDecoder,
-                                nn.TransformerEncoderLayer, nn.TransformerDecoderLayer, nn.DataParallel)):
+        # --- CONTAINERS / WRAPPERS --- #
+        elif isinstance(
+            layer,
+            (
+                nn.Transformer,
+                nn.TransformerEncoder,
+                nn.TransformerDecoder,
+                nn.TransformerEncoderLayer,
+                nn.TransformerDecoderLayer,
+                nn.DataParallel,
+            ),
+        ):
             flop = 0
 
-        self._current_batch_flop += int(flop)
+        self._current_forward_flop += int(flop)
 
-    # ---------------- FLOP FORMULAS ---------------- #
+    # ------------------------------------------------------------
+    # FLOP formulas
+    # ------------------------------------------------------------
+
     # Conv
 
     def _conv1d_flop(self, conv: nn.Conv1d, x, y):
         batch_size = x.shape[0]
-        C_in = conv.in_channels
-        C_out = conv.out_channels
-        K = conv.kernel_size[0]
-        L_out = y.shape[2]
+        c_in = conv.in_channels
+        c_out = conv.out_channels
+        k = conv.kernel_size[0]
+        l_out = y.shape[2]
         groups = conv.groups
-        flop_per_out = 2 * (C_in // groups) * K
-        num_out_elements = batch_size * C_out * L_out
+        flop_per_out = 2 * (c_in // groups) * k
+        num_out_elements = batch_size * c_out * l_out
         return flop_per_out * num_out_elements
 
     def _conv2d_flop(self, conv: nn.Conv2d, x, y):
         batch_size = x.shape[0]
-        C_in = conv.in_channels
-        C_out = conv.out_channels
-        K_h, K_w = conv.kernel_size
-        H_out, W_out = y.shape[2], y.shape[3]
+        c_in = conv.in_channels
+        c_out = conv.out_channels
+        k_h, k_w = conv.kernel_size
+        h_out, w_out = y.shape[2], y.shape[3]
         groups = conv.groups
-        flop_per_out = 2 * (C_in // groups) * K_h * K_w
-        num_out_elements = batch_size * C_out * H_out * W_out
+        flop_per_out = 2 * (c_in // groups) * k_h * k_w
+        num_out_elements = batch_size * c_out * h_out * w_out
         return flop_per_out * num_out_elements
 
     def _conv3d_flop(self, conv: nn.Conv3d, x, y):
         batch_size = x.shape[0]
-        C_in = conv.in_channels
-        C_out = conv.out_channels
-        K_d, K_h, K_w = conv.kernel_size
-        D_out, H_out, W_out = y.shape[2], y.shape[3], y.shape[4]
+        c_in = conv.in_channels
+        c_out = conv.out_channels
+        k_d, k_h, k_w = conv.kernel_size
+        d_out, h_out, w_out = y.shape[2], y.shape[3], y.shape[4]
         groups = conv.groups
-        flop_per_out = 2 * (C_in // groups) * K_d * K_h * K_w
-        num_out_elements = batch_size * C_out * D_out * H_out * W_out
+        flop_per_out = 2 * (c_in // groups) * k_d * k_h * k_w
+        num_out_elements = batch_size * c_out * d_out * h_out * w_out
         return flop_per_out * num_out_elements
 
     def _convtranspose1d_flop(self, conv: nn.ConvTranspose1d, x, y):
         batch_size = x.shape[0]
-        C_in = conv.in_channels
-        C_out = conv.out_channels
-        K = conv.kernel_size[0]
-        L_out = y.shape[2]
+        c_in = conv.in_channels
+        c_out = conv.out_channels
+        k = conv.kernel_size[0]
+        l_out = y.shape[2]
         groups = conv.groups
-        flop_per_out = 2 * (C_in // groups) * K
-        num_out_elements = batch_size * C_out * L_out
+        flop_per_out = 2 * (c_in // groups) * k
+        num_out_elements = batch_size * c_out * l_out
         return flop_per_out * num_out_elements
 
     def _convtranspose2d_flop(self, conv: nn.ConvTranspose2d, x, y):
         batch_size = x.shape[0]
-        C_in = conv.in_channels
-        C_out = conv.out_channels
-        K_h, K_w = conv.kernel_size
-        H_out, W_out = y.shape[2], y.shape[3]
+        c_in = conv.in_channels
+        c_out = conv.out_channels
+        k_h, k_w = conv.kernel_size
+        h_out, w_out = y.shape[2], y.shape[3]
         groups = conv.groups
-        flop_per_out = 2 * (C_in // groups) * K_h * K_w
-        num_out_elements = batch_size * C_out * H_out * W_out
+        flop_per_out = 2 * (c_in // groups) * k_h * k_w
+        num_out_elements = batch_size * c_out * h_out * w_out
         return flop_per_out * num_out_elements
 
     def _convtranspose3d_flop(self, conv: nn.ConvTranspose3d, x, y):
         batch_size = x.shape[0]
-        C_in = conv.in_channels
-        C_out = conv.out_channels
-        K_d, K_h, K_w = conv.kernel_size
-        D_out, H_out, W_out = y.shape[2], y.shape[3], y.shape[4]
+        c_in = conv.in_channels
+        c_out = conv.out_channels
+        k_d, k_h, k_w = conv.kernel_size
+        d_out, h_out, w_out = y.shape[2], y.shape[3], y.shape[4]
         groups = conv.groups
-        flop_per_out = 2 * (C_in // groups) * K_d * K_h * K_w
-        num_out_elements = batch_size * C_out * D_out * H_out * W_out
+        flop_per_out = 2 * (c_in // groups) * k_d * k_h * k_w
+        num_out_elements = batch_size * c_out * d_out * h_out * w_out
         return flop_per_out * num_out_elements
 
     # Linear
@@ -333,64 +338,60 @@ class TorchBackend(BaseBackend):
     # Pooling
 
     def _pool1d_flop(self, layer, x, y):
-        batch_size, C, L_out = y.shape
+        batch_size, c, l_out = y.shape
         if hasattr(layer, "kernel_size"):
             k = layer.kernel_size if isinstance(layer.kernel_size, int) else layer.kernel_size[0]
         else:
-            L_in = x.shape[2]
-            k = L_in // L_out if L_out > 0 else 1
-        k_eff = max(k, 1)
-        flop_per_out = k_eff
-        return batch_size * C * L_out * flop_per_out
+            l_in = x.shape[2]
+            k = l_in // l_out if l_out > 0 else 1
+        flop_per_out = max(k, 1)
+        return batch_size * c * l_out * flop_per_out
 
     def _pool2d_flop(self, layer, x, y):
-        batch_size, C, H_out, W_out = y.shape
+        batch_size, c, h_out, w_out = y.shape
         if hasattr(layer, "kernel_size"):
             if isinstance(layer.kernel_size, int):
-                K_h = K_w = layer.kernel_size
+                k_h = k_w = layer.kernel_size
             else:
-                K_h, K_w = layer.kernel_size
+                k_h, k_w = layer.kernel_size
         else:
-            H_in, W_in = x.shape[2], x.shape[3]
-            K_h = max(H_in // H_out, 1)
-            K_w = max(W_in // W_out, 1)
-        k_eff = max(K_h * K_w, 1)
-        flop_per_out = k_eff
-        return batch_size * C * H_out * W_out * flop_per_out
+            h_in, w_in = x.shape[2], x.shape[3]
+            k_h = max(h_in // h_out, 1)
+            k_w = max(w_in // w_out, 1)
+        flop_per_out = max(k_h * k_w, 1)
+        return batch_size * c * h_out * w_out * flop_per_out
 
     def _pool3d_flop(self, layer, x, y):
-        batch_size, C, D_out, H_out, W_out = y.shape
+        batch_size, c, d_out, h_out, w_out = y.shape
         if hasattr(layer, "kernel_size"):
             ks = layer.kernel_size
             if isinstance(ks, int):
-                K_d = K_h = K_w = ks
+                k_d = k_h = k_w = ks
             else:
-                K_d, K_h, K_w = ks
+                k_d, k_h, k_w = ks
         else:
-            D_in, H_in, W_in = x.shape[2], x.shape[3], x.shape[4]
-            K_d = max(D_in // D_out, 1)
-            K_h = max(H_in // H_out, 1)
-            K_w = max(W_in // W_out, 1)
-        k_eff = max(K_d * K_h * K_w, 1)
-        flop_per_out = k_eff
-        return batch_size * C * D_out * H_out * W_out * flop_per_out
+            d_in, h_in, w_in = x.shape[2], x.shape[3], x.shape[4]
+            k_d = max(d_in // d_out, 1)
+            k_h = max(h_in // h_out, 1)
+            k_w = max(w_in // w_out, 1)
+        flop_per_out = max(k_d * k_h * k_w, 1)
+        return batch_size * c * d_out * h_out * w_out * flop_per_out
 
-    # Normalization (estimation: ~4 FLOP per elemento)
-    def _batchnorm_flop(self, layer, x, y):
+    # Normalization
+
+    def _batchnorm_flop(self, y):
         return 4 * y.numel()
 
-    def _layernorm_flop(self, layer, x, y):
+    def _layernorm_flop(self, y):
         return 4 * y.numel()
 
-    def _groupnorm_flop(self, layer, x, y):
+    def _groupnorm_flop(self, y):
         return 4 * y.numel()
 
-    def _instancenorm_flop(self, layer, x, y):
+    def _instancenorm_flop(self, y):
         return 4 * y.numel()
 
-    # RMSNorm (estimation)
-    def _rmsnorm_flop(self, layer, x, y):
-        # normalized_shape può essere int o tuple
+    def _rmsnorm_flop(self, layer, y):
         norm_shape = getattr(layer, "normalized_shape", None)
         if norm_shape is None:
             return 4 * y.numel()
@@ -398,40 +399,41 @@ class TorchBackend(BaseBackend):
         d = int(norm_shape) if isinstance(norm_shape, int) else int(torch.tensor(norm_shape).prod().item())
         if d <= 0:
             return 0
-        vectors = int(y.numel() // d)
 
+        vectors = int(y.numel() // d)
         has_bias = getattr(layer, "bias", None) is not None
         ops_per_vec = d + (d - 1) + 1 + 1 + d + d + (d if has_bias else 0)
         return vectors * ops_per_vec
 
     # Activations
-    def _relu_flop(self, x, y):
+
+    def _relu_flop(self, y):
         return y.numel()
 
-    def _leakyrelu_flop(self, x, y):
+    def _leakyrelu_flop(self, y):
         return 2 * y.numel()
 
-    def _prelu_flop(self, x, y):
+    def _prelu_flop(self, y):
         return 2 * y.numel()
 
-    def _sigmoid_flop(self, x, y):
+    def _sigmoid_flop(self, y):
         return 4 * y.numel()
 
-    def _tanh_flop(self, x, y):
+    def _tanh_flop(self, y):
         return 6 * y.numel()
 
     # Softmax family
-    def _softmax_family_flop(self, layer, x, y):
+
+    def _softmax_family_flop(self, layer, y):
         if y is None:
             return 0
 
-        # Softmax2d: normalize over C in (N,C,H,W)
         if isinstance(layer, nn.Softmax2d):
             if y.dim() != 4:
                 return 0
-            N, C, H, W = y.shape
-            vectors = int(N * H * W)
-            k = int(C)
+            n, c, h, w = y.shape
+            vectors = int(n * h * w)
+            k = int(c)
         else:
             dim = getattr(layer, "dim", -1)
             if dim is None or dim < 0:
@@ -442,22 +444,19 @@ class TorchBackend(BaseBackend):
         if k <= 0 or vectors <= 0:
             return 0
 
-        # softmax per vettore:
-        # exp k + sum(k-1) + div k
-        softmax_ops = vectors * (k + (k - 1) + k)  # (3k - 1)
+        softmax_ops = vectors * (k + (k - 1) + k)  # 3k - 1
 
         if isinstance(layer, nn.Softmin):
-            # softmin(x)=softmax(-x): 
             return softmax_ops + vectors * k
 
         if isinstance(layer, nn.LogSoftmax):
-            # logsoftmax: stima = softmax + (sub k + log 1)
             return softmax_ops + vectors * (k + 1)
 
         return softmax_ops
 
-    # RNN / LSTM / GRU (classic estimation)
-    def _rnn_flop(self, layer, x, y):
+    # RNN / LSTM / GRU
+
+    def _rnn_flop(self, layer, x):
         batch_first = getattr(layer, "batch_first", False)
         if batch_first:
             batch_size, seq_len, input_size = x.shape
@@ -479,76 +478,85 @@ class TorchBackend(BaseBackend):
         timesteps = seq_len * num_layers * num_directions
         return batch_size * timesteps * flop_per_timestep
 
-    # RNNCell / LSTMCell / GRUCell
-    def _rnncell_flop(self, layer: nn.RNNCell, inputs, y):
+    # Cells
+
+    def _rnncell_flop(self, layer: nn.RNNCell, inputs):
         x = inputs[0] if isinstance(inputs, (tuple, list)) and len(inputs) > 0 else None
         hx = inputs[1] if isinstance(inputs, (tuple, list)) and len(inputs) > 1 else None
         if not isinstance(x, torch.Tensor):
             return 0
-        B = int(x.shape[0]) if x.dim() >= 2 else 1
-        I = int(x.shape[-1])
-        H = int(layer.hidden_size)
-        fl = 2 * B * H * I
+
+        b = int(x.shape[0]) if x.dim() >= 2 else 1
+        i = int(x.shape[-1])
+        h = int(layer.hidden_size)
+
+        fl = 2 * b * h * i
         if isinstance(hx, torch.Tensor):
-            fl += 2 * B * H * H
-        fl += B * H  # bias
-        fl += B * H  # nonlinearity
+            fl += 2 * b * h * h
+        fl += b * h
+        fl += b * h
         return int(fl)
 
-    def _lstmcell_flop(self, layer: nn.LSTMCell, inputs, output):
+    def _lstmcell_flop(self, layer: nn.LSTMCell, inputs):
         x = inputs[0] if isinstance(inputs, (tuple, list)) and len(inputs) > 0 else None
         hx = inputs[1] if isinstance(inputs, (tuple, list)) and len(inputs) > 1 else None
         if not isinstance(x, torch.Tensor):
             return 0
-        B = int(x.shape[0]) if x.dim() >= 2 else 1
-        I = int(x.shape[-1])
-        H = int(layer.hidden_size)
-        fl = 4 * (2 * B * H * I)
+
+        b = int(x.shape[0]) if x.dim() >= 2 else 1
+        i = int(x.shape[-1])
+        h = int(layer.hidden_size)
+
+        fl = 4 * (2 * b * h * i)
         if hx is not None:
-            fl += 4 * (2 * B * H * H)
-        fl += 10 * B * H 
+            fl += 4 * (2 * b * h * h)
+        fl += 10 * b * h
         return int(fl)
 
-    def _grucell_flop(self, layer: nn.GRUCell, inputs, y):
+    def _grucell_flop(self, layer: nn.GRUCell, inputs):
         x = inputs[0] if isinstance(inputs, (tuple, list)) and len(inputs) > 0 else None
         hx = inputs[1] if isinstance(inputs, (tuple, list)) and len(inputs) > 1 else None
         if not isinstance(x, torch.Tensor):
             return 0
-        B = int(x.shape[0]) if x.dim() >= 2 else 1
-        I = int(x.shape[-1])
-        H = int(layer.hidden_size)
-        fl = 3 * (2 * B * H * I)
+
+        b = int(x.shape[0]) if x.dim() >= 2 else 1
+        i = int(x.shape[-1])
+        h = int(layer.hidden_size)
+
+        fl = 3 * (2 * b * h * i)
         if isinstance(hx, torch.Tensor):
-            fl += 3 * (2 * B * H * H)
-        fl += 8 * B * H  
+            fl += 3 * (2 * b * h * h)
+        fl += 8 * b * h
         return int(fl)
 
-    # MultiheadAttention (estimation)
-    def _mha_flop(self, layer: nn.MultiheadAttention, input, output):
-        q = input[0]
-        k = input[1] if len(input) > 1 and input[1] is not None else q
-        v = input[2] if len(input) > 2 and input[2] is not None else q
+    # MultiheadAttention
 
-        L, N, E = q.shape
-        S = k.shape[0]
+    def _mha_flop(self, layer: nn.MultiheadAttention, inputs):
+        q = inputs[0]
+        k = inputs[1] if len(inputs) > 1 and inputs[1] is not None else q
+        v = inputs[2] if len(inputs) > 2 and inputs[2] is not None else q
+
+        l, n, e = q.shape
+        s = k.shape[0]
 
         num_heads = layer.num_heads
-        d_k = E // num_heads
+        d_k = e // num_heads
 
-        flop_qkv = 3 * 2 * E * E * L * N
-        flop_scores = num_heads * 2 * L * S * d_k
-        flop_attn_v = num_heads * 2 * L * S * d_k
-        flop_out = 2 * E * E * L * N
+        flop_qkv = 3 * 2 * e * e * l * n
+        flop_scores = num_heads * 2 * l * s * d_k
+        flop_attn_v = num_heads * 2 * l * s * d_k
+        flop_out = 2 * e * e * l * n
 
         return flop_qkv + flop_scores + flop_attn_v + flop_out
 
-    # Embedding (lookup: 1 FLOP for extracted value)
-    def _embedding_flop(self, layer: nn.Embedding, x, y):
+    # Embedding
+
+    def _embedding_flop(self, layer: nn.Embedding, x):
         num_indices = x.numel()
         emb_dim = layer.embedding_dim
         return num_indices * emb_dim
 
-    def _embeddingbag_flop(self, layer: nn.EmbeddingBag, x, y):
+    def _embeddingbag_flop(self, layer: nn.EmbeddingBag, x):
         num_indices = x.numel()
         emb_dim = layer.embedding_dim
         return num_indices * emb_dim
