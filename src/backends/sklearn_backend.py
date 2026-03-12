@@ -107,54 +107,220 @@ class SklearnBackend(BaseBackend):
     # ------------------------------------------------------------
     # FLOP estimation
     # ------------------------------------------------------------
-
     def _estimate_fit_flop(self, X: np.ndarray, y: Any) -> int:
-        """
-        Training FLOP estimation for sklearn models.
-
-        At the moment kept conservative / minimal.
-        Can be extended in the future with model-specific formulas.
-        """
+    """
+    Estimate training FLOP for common sklearn models.
+    """
+    try:
+        from sklearn.linear_model import (
+            LinearRegression,
+            Ridge,
+            Lasso,
+            LogisticRegression,
+            SGDClassifier,
+            SGDRegressor,
+        )
+        from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+        from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+        from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+        from sklearn.svm import SVC, SVR, LinearSVC, LinearSVR
+        from sklearn.cluster import KMeans
+    except ImportError:
         return 0
 
-    def _estimate_predict_flop(self, X: np.ndarray, y: np.ndarray) -> int:
-        try:
-            from sklearn.linear_model import LinearRegression, Ridge, Lasso, LogisticRegression
-            from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
-        except ImportError:
-            return 0
-
-        if X.ndim != 2:
-            return 0
-
-        n_samples, n_features = X.shape
-        n_outputs = 1 if y.ndim == 1 else y.shape[1]
-
-        model = self.model
-
-        # Linear models / logistic regression:
-        # y = XW + b
-        if isinstance(model, (LinearRegression, Ridge, Lasso, LogisticRegression)):
-            flop = 2 * n_features * n_outputs * n_samples
-            return int(flop)
-
-        # KNN brute-force style estimation:
-        # distance from each test point to all training points
-        if isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
-            n_train = getattr(model, "n_samples_fit_", None)
-            if n_train is None and hasattr(model, "_fit_X"):
-                n_train = model._fit_X.shape[0]
-            if n_train is None:
-                return 0
-
-            flop = 2 * int(n_train) * n_features * n_samples
-            return int(flop)
-
+    if X.ndim != 2:
         return 0
+
+    n_samples, n_features = X.shape
+    model = self.model
+
+    # ---------------- LinearRegression ---------------- #
+    if isinstance(model, LinearRegression):
+        # Normal equation / least squares style estimate
+        flop = 2 * n_samples * (n_features ** 2) + (2 / 3) * (n_features ** 3)
+        return int(flop)
+
+    # ---------------- Ridge / Lasso ---------------- #
+    if isinstance(model, (Ridge, Lasso)):
+        iters = getattr(model, "max_iter", None)
+        if iters is None or iters <= 0:
+            iters = 1000
+        flop = iters * n_samples * n_features
+        return int(flop)
+
+    # ---------------- LogisticRegression ---------------- #
+    if isinstance(model, LogisticRegression):
+        iters = getattr(model, "max_iter", 100)
+        n_classes = len(np.unique(y)) if y is not None else 1
+        flop = iters * n_samples * n_features * max(n_classes, 1)
+        return int(flop)
+
+    # ---------------- SGDClassifier / SGDRegressor ---------------- #
+    if isinstance(model, (SGDClassifier, SGDRegressor)):
+        iters = getattr(model, "max_iter", 1000)
+        if y is not None and isinstance(model, SGDClassifier):
+            n_classes = len(np.unique(y))
+        else:
+            n_classes = 1
+        # one pass update per sample ~ O(d) per class
+        flop = iters * n_samples * n_features * max(n_classes, 1)
+        return int(flop)
+
+    # ---------------- KNN ---------------- #
+    if isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
+        # KNN fit is basically memorization / indexing
+        return 0
+
+    # ---------------- Decision Tree ---------------- #
+    if isinstance(model, (DecisionTreeClassifier, DecisionTreeRegressor)):
+        flop = n_samples * n_features * np.log2(max(n_samples, 2))
+        return int(flop)
+
+    # ---------------- Random Forest ---------------- #
+    if isinstance(model, (RandomForestClassifier, RandomForestRegressor)):
+        n_trees = getattr(model, "n_estimators", 100)
+        flop = n_trees * n_samples * n_features * np.log2(max(n_samples, 2))
+        return int(flop)
+
+    # ---------------- Linear SVM ---------------- #
+    if isinstance(model, (LinearSVC, LinearSVR)):
+        iters = getattr(model, "max_iter", 1000)
+        flop = iters * n_samples * n_features
+        return int(flop)
+
+    # ---------------- Kernel SVM ---------------- #
+    if isinstance(model, (SVC, SVR)):
+        # kernel matrix build + iterative optimization rough estimate
+        # O(n^2 d) for kernel evaluations
+        flop = (n_samples ** 2) * n_features
+        return int(flop)
+
+    # ---------------- KMeans ---------------- #
+    if isinstance(model, KMeans):
+        k = getattr(model, "n_clusters", 8)
+        iters = getattr(model, "max_iter", 300)
+        # assignment + centroid update
+        flop = iters * n_samples * n_features * k
+        return int(flop)
+
+    return 0
+
+   def _estimate_predict_flop(self, X: np.ndarray, y: np.ndarray) -> int:
+    try:
+        from sklearn.linear_model import (
+            LinearRegression,
+            Ridge,
+            Lasso,
+            LogisticRegression,
+            SGDClassifier,
+            SGDRegressor,
+        )
+        from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+        from sklearn.svm import SVC, SVR, LinearSVC, LinearSVR
+        from sklearn.cluster import KMeans
+    except ImportError:
+        return 0
+
+    if X.ndim != 2:
+        return 0
+
+    n_samples, n_features = X.shape
+    n_outputs = 1 if y.ndim == 1 else y.shape[1]
+
+    model = self.model
+
+    # ---------------- Linear / Logistic / SGD ---------------- #
+    if isinstance(
+        model,
+        (
+            LinearRegression,
+            Ridge,
+            Lasso,
+            LogisticRegression,
+            SGDClassifier,
+            SGDRegressor,
+            LinearSVC,
+            LinearSVR,
+        ),
+    ):
+        flop = 2 * n_features * n_outputs * n_samples
+        return int(flop)
+
+    # ---------------- KNN ---------------- #
+    if isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
+        n_train = getattr(model, "n_samples_fit_", None)
+        if n_train is None and hasattr(model, "_fit_X"):
+            n_train = model._fit_X.shape[0]
+        if n_train is None:
+            return 0
+        flop = 2 * int(n_train) * n_features * n_samples
+        return int(flop)
+
+    # ---------------- Kernel SVM ---------------- #
+    if isinstance(model, (SVC, SVR)):
+        support_vectors = getattr(model, "support_vectors_", None)
+        n_sv = support_vectors.shape[0] if support_vectors is not None else n_samples
+        flop = 2 * n_sv * n_features * n_samples
+        return int(flop)
+
+    # ---------------- KMeans predict ---------------- #
+    if isinstance(model, KMeans):
+        k = getattr(model, "n_clusters", 8)
+        flop = 2 * n_samples * n_features * k
+        return int(flop)
+
+    return 0
 
     def _estimate_transform_flop(self, X: np.ndarray, Z: np.ndarray) -> int:
-        """
-        FLOP estimation for transform-like methods.
-        Conservative default = 0.
-        """
+    """
+    Estimate FLOP for common sklearn transform methods.
+    """
+    try:
+        from sklearn.preprocessing import StandardScaler, MinMaxScaler, Normalizer
+        from sklearn.decomposition import PCA
+        from sklearn.cluster import KMeans
+    except ImportError:
         return 0
+
+    if X.ndim != 2:
+        return 0
+
+    n_samples, n_features = X.shape
+    model = self.model
+
+    # ---------------- StandardScaler ---------------- #
+    if isinstance(model, StandardScaler):
+        # subtract mean + divide by std
+        return int(2 * n_samples * n_features)
+
+    # ---------------- MinMaxScaler ---------------- #
+    if isinstance(model, MinMaxScaler):
+        # subtract min + divide range
+        return int(2 * n_samples * n_features)
+
+    # ---------------- Normalizer ---------------- #
+    if isinstance(model, Normalizer):
+        # norm + divide
+        return int(2 * n_samples * n_features)
+
+    # ---------------- PCA ---------------- #
+    if isinstance(model, PCA):
+        n_components = getattr(model, "n_components_", None)
+        if n_components is None:
+            n_components = getattr(model, "n_components", None)
+        if n_components is None:
+            n_components = Z.shape[1] if Z.ndim == 2 else n_features
+
+        # matrix projection X * W
+        return int(2 * n_samples * n_features * int(n_components))
+
+    # ---------------- KMeans.transform ---------------- #
+    if isinstance(model, KMeans):
+        k = getattr(model, "n_clusters", 8)
+        # distances to all centroids
+        return int(2 * n_samples * n_features * k)
+
+    return 0
+  
+
+  
