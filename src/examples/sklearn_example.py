@@ -1,49 +1,61 @@
-import os
-import sys
-
 import numpy as np
 from sklearn.datasets import make_classification
 from sklearn.linear_model import LogisticRegression
-
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-
+from sklearn.preprocessing import StandardScaler
 from floppy_tracker import FLOPpyTracker
-from trainers import train_sklearn
+
+def test_logistic_regression():
+    X, y = make_classification(
+        n_samples=300,
+        n_features=20,
+        random_state=0,
+    )
+
+    model = LogisticRegression(max_iter=100)
+
+    tracker = FLOPpyTracker(
+        run_name="sklearn_test",
+        print_summary=True,
+    )
+
+    with tracker.run(
+        model=model,
+        export_path="sklearn_test.csv",
+    ):
+        model.fit(X, y)
+        model.predict(X)
+
+    rep = tracker.report
+
+    assert rep.model_flop > 0
+    assert rep.optimizer_flop == 0
+    assert rep.loss_forward_flop == 0
+    assert rep.loss_backward_flop == 0
+
+
+def test_transform():
+    X = np.random.randn(200, 10)
+    scaler = StandardScaler()
+
+    tracker = FLOPpyTracker(
+        run_name="sklearn_transform",
+        print_summary=True,
+    )
+
+    with tracker.run(
+        model=scaler,
+        export_path="sklearn_transform.csv",
+    ):
+        scaler.fit(X)
+        scaler.transform(X)
+
+    rep = tracker.report
+
+    assert rep.model_flop >= 0
 
 
 def main():
-    X, y = make_classification(
-        n_samples=2000,
-        n_features=20,
-        n_informative=10,
-        n_classes=2,
-        random_state=42,
-    )
-
-    model = LogisticRegression(max_iter=1000)
-
-    # FIT
-    FLOPpyTracker(run_name="sklearn_logreg_fit", print_summary=True).run(
-        model=model,
-        backend="sklearn",
-        train_fn=train_sklearn,
-        train_kwargs={"model": model, "mode": "fit", "X": X, "y": y},
-        log_per_batch=True,
-        export_path="sklearn_logreg_fit_flop.csv",
-        use_wandb=False,
-    )
-
-    # PREDICT
-    FLOPpyTracker(run_name="sklearn_logreg_predict", print_summary=True).run(
-        model=model,
-        backend="sklearn",
-        train_fn=train_sklearn,
-        train_kwargs={"model": model, "mode": "predict", "X": X},
-        log_per_batch=True,
-        export_path="sklearn_logreg_predict_flop.csv",
-        use_wandb=False,
-    )
-
-
+    test_logistic_regression()
+    test_transform()
 if __name__ == "__main__":
     main()
