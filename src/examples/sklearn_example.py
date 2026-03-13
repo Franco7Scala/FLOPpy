@@ -4,58 +4,43 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from floppy_tracker import FLOPpyTracker
 
-def test_logistic_regression():
-    X, y = make_classification(
-        n_samples=300,
-        n_features=20,
-        random_state=0,
-    )
 
-    model = LogisticRegression(max_iter=100)
+X, y = make_classification(
+    n_samples=300,
+    n_features=20,
+    random_state=0
+)
 
-    tracker = FLOPpyTracker(
-        run_name="sklearn_test",
-        print_summary=True,
-    )
+model = LogisticRegression(max_iter=100)
 
-    with tracker.run(
-        model=model,
-        export_path="sklearn_test.csv",
-    ):
-        model.fit(X, y)
-        model.predict(X)
+tracker = FLOPpyTracker(
+    run_name="sklearn_example",
+    print_summary=True
+)
 
-    rep = tracker.report
+with tracker.run(
+    model=model,
+    export_path="sklearn_example.csv"
+):
 
-    assert rep.model_flop > 0
-    assert rep.optimizer_flop == 0
-    assert rep.loss_forward_flop == 0
-    assert rep.loss_backward_flop == 0
+    model.fit(X, y)
+
+    preds = model.predict(X)
 
 
-def test_transform():
-    X = np.random.randn(200, 10)
-    scaler = StandardScaler()
+X = np.random.randn(200, 10)
 
-    tracker = FLOPpyTracker(
-        run_name="sklearn_transform",
-        print_summary=True,
-    )
+scaler = StandardScaler()
 
-    with tracker.run(
-        model=scaler,
-        export_path="sklearn_transform.csv",
-    ):
-        scaler.fit(X)
-        scaler.transform(X)
+tracker = FLOPpyTracker(
+    run_name="sklearn_transform_example",
+    print_summary=True
+)
 
-    rep = tracker.report
+with tracker.run(
+    model=scaler,
+):
 
-    assert rep.model_flop >= 0
+    scaler.fit(X)
 
-
-def main():
-    test_logistic_regression()
-    test_transform()
-if __name__ == "__main__":
-    main()
+    X_scaled = scaler.transform(X)
