@@ -3,8 +3,10 @@ import torch.nn as nn
 from floppy_tracker import FLOPpyTracker
 
 class TinyNet(nn.Module):
+
     def __init__(self):
         super().__init__()
+
         self.net = nn.Sequential(
             nn.Linear(20, 32),
             nn.ReLU(),
@@ -15,43 +17,37 @@ class TinyNet(nn.Module):
         return self.net(x)
 
 
-def main():
-    torch.manual_seed(0)
+model = TinyNet()
 
-    x = torch.randn(64, 20)
-    y = torch.randint(0, 4, (64,))
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
-    model = TinyNet()
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-    loss_fn = nn.CrossEntropyLoss()
+loss_fn = nn.CrossEntropyLoss()
 
-    tracker = FLOPpyTracker(
-        run_name="torch_training_test",
-        print_summary=True,
-    )
+x = torch.randn(32, 20)
+y = torch.randint(0, 4, (32,))
 
-    with tracker.run(
-        model=model,
-        optimizer=optimizer,
-        loss_fn=loss_fn,
-        export_path="torch_training_test.csv",
-    ):
-        model.train()
+tracker = FLOPpyTracker(
+    run_name="torch_training_example",
+    print_summary=True
+)
 
-        for _ in range(5):
-            optimizer.zero_grad()
-            out = model(x)
-            loss = loss_fn(out, y)
-            loss.backward()
-            optimizer.step()
+with tracker.run(
+    model=model,
+    optimizer=optimizer,
+    loss_fn=loss_fn,
+    export_path="torch_training_example.csv"
+):
 
-    rep = tracker.report
+    model.train()
 
-    assert rep.model_flop > 0
-    assert rep.optimizer_flop > 0
-    assert rep.loss_forward_flop > 0
-    assert rep.overall_flop > rep.model_flop
+    for _ in range(5):
 
+        optimizer.zero_grad()
 
-if __name__ == "__main__":
-    main()
+        out = model(x)
+
+        loss = loss_fn(out, y)
+
+        loss.backward()
+
+        optimizer.step()
