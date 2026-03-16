@@ -135,7 +135,7 @@ class SklearnBackend(BaseBackend):
         if isinstance(model, (Ridge, Lasso)):
             iters = getattr(model, "max_iter", None)
             if iters is None or iters <= 0:
-                iters = 1000
+                iters = 1000 #fallback when sklearn does not expose a reliable iteration count
 
             flop = iters * n_samples * n_features
             return int(flop)
@@ -167,7 +167,18 @@ class SklearnBackend(BaseBackend):
 
         # ---------------- KNN ---------------- #
         if isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
-            return 0
+            algorithm = getattr(model, "algorithm", "auto")
+
+            if algorithm == "brute":
+                # dataset ingestion / storage-like cost
+                return int(n_samples * n_features)
+
+            if algorithm in ("kd_tree", "ball_tree"):
+                # tree construction cost approximation
+                return int(n_samples * n_features * np.log2(max(n_samples, 2)))
+
+            # auto fallback
+            return int(n_samples * n_features)
 
         # ---------------- Decision Tree ---------------- #
         if isinstance(model, (DecisionTreeClassifier, DecisionTreeRegressor)):
