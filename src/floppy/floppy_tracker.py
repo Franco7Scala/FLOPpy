@@ -1,14 +1,14 @@
 from __future__ import annotations
-from tracker import Tracker
 from typing import Any, Dict, Optional
 from torch.optim import Optimizer
+from tracker import Tracker
 from backends.sklearn_backend import SklearnBackend
 from utils.floppy_report import FLOPpyReport
 from utils.hardware_info import get_hardware_info
+from utils.tokenizer_ops import TokenizerWithOps, wrap_tokenizer
 
 
 class FLOPpyTracker:
-
     def __init__(self, run_name: Optional[str] = None, print_summary: bool = True, print_hardware: bool = False):
         self.run_name = run_name
         self.print_summary = print_summary
@@ -29,7 +29,6 @@ class FLOPpyTracker:
     def report(self) -> FLOPpyReport:
         if self._report is None:
             raise RuntimeError("No report available: run training within the context manager before accessing 'report'.")
-
         return self._report
 
     def run(
@@ -60,23 +59,38 @@ class FLOPpyTracker:
         if self.print_hardware:
             self._hardware = get_hardware_info()
 
-        self._tracker = Tracker(model=self._model, backend="auto", export_path=self._export_path, use_wandb=self._use_wandb, wandb_project=self._wandb_project, wandb_token=self._wandb_token, run_name=self.run_name)
+        self._tracker = Tracker(
+            model=self._model,
+            backend="auto",
+            export_path=self._export_path,
+            use_wandb=self._use_wandb,
+            wandb_project=self._wandb_project,
+            wandb_token=self._wandb_token,
+            run_name=self.run_name,
+        )
         self._tracker.__enter__()
 
         if not isinstance(self._tracker.backend, SklearnBackend):
-            self._tracker.attach_torch_hooks(model=self._model, loss_fn=self._loss_fn, optimizer=self._optimizer, enable_debug_print=self._hooks_debug_print)
+            self._tracker.attach_torch_hooks(
+                model=self._model,
+                loss_fn=self._loss_fn,
+                optimizer=self._optimizer,
+                enable_debug_print=self._hooks_debug_print,
+            )
 
         return self
 
     def __exit__(self, exc_type, exc, tb):
         if self._tracker is not None:
             self._tracker.__exit__(exc_type, exc, tb)
+
             model_flop = int(getattr(self._tracker, "total_model_flop", 0))
             optimizer_flop = int(getattr(self._tracker, "total_optimizer_flop", 0))
             loss_forward_flop = int(getattr(self._tracker, "total_loss_forward_flop", 0))
             loss_backward_flop = int(getattr(self._tracker, "total_loss_backward_flop", 0))
             preproc_ops = int(getattr(self._tracker, "total_preproc_ops", 0))
             overall_flop = int(getattr(self._tracker, "total_overall_flop", 0))
+
             self._report = FLOPpyReport(
                 run_name=self.run_name,
                 backend=self._tracker.backend.__class__.__name__.replace("Backend", "").lower(),
@@ -96,6 +110,30 @@ class FLOPpyTracker:
             self._print_summary()
 
         return False
+
+    def wrap_tokenizer(
+        self,
+        base_tokenizer,
+        cost_model: str = "chars+tokens",
+    ) -> TokenizerWithOps:
+        """
+        Returns a wrapped tokenizer connected to the internal Tracker.
+
+        Must be called while the context manager is active:
+            with ft.run(...):
+                tok = ft.wrap_tokenizer(base_tokenizer)
+        """
+        if self._tracker is None:
+            raise RuntimeError(
+                "wrap_tokenizer(...) requires an active Tracker. "
+                "Use it inside: with FLOPpyTracker(...).run(...) as ft:"
+            )
+
+        return wrap_tokenizer(
+            base_tokenizer=base_tokenizer,
+            tracker=self._tracker,
+            cost_model=cost_model,
+        )
 
     def _print_summary(self) -> None:
         rep = self.report
