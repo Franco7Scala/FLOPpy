@@ -83,16 +83,25 @@ def get_hardware_info() -> HardwareInfo:
 def format_hardware_info(hw: HardwareInfo) -> str:
     parts = [
         f"OS: {hw.os} ({hw.machine})",
-        f"Python: {hw.python_version}"
+        f"Python: {hw.python_version}",
     ]
 
     if hw.torch_version:
         parts.append(f"PyTorch: {hw.torch_version}")
 
-    #TODO mettere versione sklearn pure
+    # sklearn version (optional)
+    try:
+        import sklearn
+        sklearn_ver = getattr(sklearn, "__version__", None)
+        if sklearn_ver:
+            parts.append(f"scikit-learn: {sklearn_ver}")
+    except Exception:
+        pass
 
     if hw.cpu_cores_logical or hw.cpu_cores_physical:
-        parts.append(f"CPU cores: logical={hw.cpu_cores_logical}, physical={hw.cpu_cores_physical}")
+        parts.append(
+            f"CPU cores: logical={hw.cpu_cores_logical}, physical={hw.cpu_cores_physical}"
+        )
 
     if hw.ram_total_gb is not None:
         parts.append(f"RAM: {hw.ram_total_gb} GB")
@@ -100,7 +109,7 @@ def format_hardware_info(hw: HardwareInfo) -> str:
     if hw.cuda_available:
         parts.append(f"CUDA: yes (gpus={hw.gpu_count}, name={hw.gpu_name})")
 
-    elif not hw.cuda_available:
+    elif hw.cuda_available is False:
         parts.append("CUDA: not available")
 
     return " | ".join(parts)
