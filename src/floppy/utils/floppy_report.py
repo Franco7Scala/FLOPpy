@@ -1,0 +1,19 @@
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
+
+
+@dataclass
+class FLOPpyReport:
+    run_name: Optional[str]
+    backend: str
+    model_flop: int
+    optimizer_flop: int
+    loss_forward_flop: int
+    loss_backward_flop: int
+    preproc_ops: int
+    overall_flop: int
+    export_path: Optional[str]
+    use_wandb: bool
+    wandb_project: Optional[str]
+    hardware: Optional[Dict[str, Any]]

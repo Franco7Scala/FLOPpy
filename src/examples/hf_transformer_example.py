@@ -1,6 +1,6 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from floppy_tracker import FLOPpyTracker
+from floppy.floppy_tracker import FLOPpyTracker
 
 
 model_name = "distilbert-base-uncased"

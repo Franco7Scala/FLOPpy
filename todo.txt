@@ -1,6 +1,30 @@
-implemetare tutti gli hook
-pulire metodo che non servono più
-aggiornare esempio di utilizzo
-tradurre i commenti e le stampe in inglese
-
 fare documentazione
+
+format_hardware_info andrebbe messa pure la versione di sklearn c'è un TODO.
+tokenizer_ops mi pare che non venga mai chiamato, andrebbe integrato nel codice del tracker.
+
+SKLEARN BK:
+
+perche iters (sklearn) se non trovato è messo a 1000? sulla base di cosa? quando succede che non c'è?
+flops di fit (KNeighborsClassifier, KNeighborsRegressor) sono 0?
+perche ritorni 0 se X.ndim != 2?
+meglio non ritornare mai 0 cosi arbitrariamente!
+
+
+TORCH BK:
+_layer_hook di transformer ed altri (l'ultimo della lista nel metodo) è  a 0, perche?
+in _softmax_family_flop ci sono tanti 0, da rimovere o spiegare meglio.
+in _mha_flop la variabile v non la usi, perche? è un errore?
+
+
+TRACKER:
+
+__enter__ hai messo questo per far si che il tracker si possa usare anche cosi?
+
+with FLOPpyTracker() as tracker:
+    tracker.start()
+    # do something
+    tracker.stop()
+
+
+

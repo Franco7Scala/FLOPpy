@@ -1,66 +1,39 @@
 from __future__ import annotations
-from dataclasses import dataclass
+from tracker import Tracker
 from typing import Any, Dict, Optional
 from torch.optim import Optimizer
 from backends.sklearn_backend import SklearnBackend
-
-@dataclass
-class FLOPpyReport:
-    run_name: Optional[str]
-    backend: str
-
-    model_flop: int
-    optimizer_flop: int
-    loss_forward_flop: int
-    loss_backward_flop: int
-    preproc_ops: int
-    overall_flop: int
-
-    export_path: Optional[str]
-    use_wandb: bool
-    wandb_project: Optional[str]
-
-    hardware: Optional[Dict[str, Any]]
+from utils.floppy_report import FLOPpyReport
+from utils.hardware_info import get_hardware_info
 
 
 class FLOPpyTracker:
-    def __init__(
-        self,
-        run_name: Optional[str] = None,
-        print_summary: bool = True,
-        print_hardware: bool = False,
-    ):
+
+    def __init__(self, run_name: Optional[str] = None, print_summary: bool = True, print_hardware: bool = False):
         self.run_name = run_name
         self.print_summary = print_summary
         self.print_hardware = print_hardware
-
         self._report: Optional[FLOPpyReport] = None
         self._tracker = None
-
         self._model = None
         self._optimizer: Optional[Optimizer] = None
         self._loss_fn: Optional[Any] = None
-
         self._export_path: Optional[str] = None
         self._use_wandb: bool = False
         self._wandb_project: Optional[str] = None
         self._wandb_token: Optional[str] = None
         self._hooks_debug_print: bool = False
-
         self._hardware: Optional[Dict[str, Any]] = None
-        self._backend_name: str = "auto"
 
     @property
     def report(self) -> FLOPpyReport:
         if self._report is None:
-            raise RuntimeError(
-                "No report available: run training within the context manager before accessing 'report'."
-            )
+            raise RuntimeError("No report available: run training within the context manager before accessing 'report'.")
+
         return self._report
 
     def run(
         self,
-        *,
         model,
         optimizer: Optional[Optimizer] = None,
         loss_fn: Optional[Any] = None,
@@ -81,58 +54,32 @@ class FLOPpyTracker:
         return self
 
     def __enter__(self) -> FLOPpyTracker:
-        from tracker import Tracker
-
         if self._model is None:
             raise RuntimeError("run(...) must be called before entering the context manager.")
 
         if self.print_hardware:
-            try:
-                from hardware_info import get_hardware_info
-                self._hardware = get_hardware_info()
-            except Exception:
-                self._hardware = None
-        else:
-            self._hardware = None
+            self._hardware = get_hardware_info()
 
-        self._tracker = Tracker(
-            model=self._model,
-            backend="auto",
-            export_path=self._export_path,
-            use_wandb=self._use_wandb,
-            wandb_project=self._wandb_project,
-            wandb_token=self._wandb_token,
-            run_name=self.run_name,
-        )
-
+        self._tracker = Tracker(model=self._model, backend="auto", export_path=self._export_path, use_wandb=self._use_wandb, wandb_project=self._wandb_project, wandb_token=self._wandb_token, run_name=self.run_name)
         self._tracker.__enter__()
 
         if not isinstance(self._tracker.backend, SklearnBackend):
-            self._tracker.attach_torch_hooks(
-                model=self._model,
-                loss_fn=self._loss_fn,
-                optimizer=self._optimizer,
-                enable_debug_print=self._hooks_debug_print,
-            )
-
-        self._backend_name = self._tracker.backend.__class__.__name__.replace("Backend", "").lower()
+            self._tracker.attach_torch_hooks(model=self._model, loss_fn=self._loss_fn, optimizer=self._optimizer, enable_debug_print=self._hooks_debug_print)
 
         return self
 
     def __exit__(self, exc_type, exc, tb):
         if self._tracker is not None:
             self._tracker.__exit__(exc_type, exc, tb)
-
             model_flop = int(getattr(self._tracker, "total_model_flop", 0))
             optimizer_flop = int(getattr(self._tracker, "total_optimizer_flop", 0))
             loss_forward_flop = int(getattr(self._tracker, "total_loss_forward_flop", 0))
             loss_backward_flop = int(getattr(self._tracker, "total_loss_backward_flop", 0))
             preproc_ops = int(getattr(self._tracker, "total_preproc_ops", 0))
             overall_flop = int(getattr(self._tracker, "total_overall_flop", 0))
-
             self._report = FLOPpyReport(
                 run_name=self.run_name,
-                backend=self._backend_name,
+                backend=self._tracker.backend.__class__.__name__.replace("Backend", "").lower(),
                 model_flop=model_flop,
                 optimizer_flop=optimizer_flop,
                 loss_forward_flop=loss_forward_flop,
@@ -157,21 +104,21 @@ class FLOPpyTracker:
         if rep.hardware is not None:
             print(f"[FLOPpyTracker{run_label}] Hardware: {rep.hardware}")
 
-        print(f"[FLOPpyTracker{run_label}] model FLOP: {rep.model_flop}")
+        print(f"[FLOPpyTracker{run_label}] model FLOPs: {rep.model_flop}")
 
         if rep.loss_forward_flop > 0:
-            print(f"[FLOPpyTracker{run_label}] loss forward FLOP: {rep.loss_forward_flop}")
+            print(f"[FLOPpyTracker{run_label}] loss forward FLOPs: {rep.loss_forward_flop}")
 
         if rep.loss_backward_flop > 0:
-            print(f"[FLOPpyTracker{run_label}] loss backward FLOP: {rep.loss_backward_flop}")
+            print(f"[FLOPpyTracker{run_label}] loss backward FLOPs: {rep.loss_backward_flop}")
 
         if rep.optimizer_flop > 0:
-            print(f"[FLOPpyTracker{run_label}] optimizer FLOP : {rep.optimizer_flop}")
+            print(f"[FLOPpyTracker{run_label}] optimizer FLOPs : {rep.optimizer_flop}")
 
         if rep.preproc_ops > 0:
             print(f"[FLOPpyTracker{run_label}] preprocessing/tokenizer Ops: {rep.preproc_ops}")
 
-        print(f"[FLOPpyTracker{run_label}] overall FLOP: {rep.overall_flop}")
+        print(f"[FLOPpyTracker{run_label}] overall FLOPs: {rep.overall_flop}")
 
         if rep.export_path:
             print(f"[FLOPpyTracker{run_label}] Export CSV: {rep.export_path}")

@@ -1,0 +1,22 @@
+[project]
+name = "FLOPpy"
+version = "0.1.0"
+authors = [
+  { name="Francesco Scala", email="francesco.scala@icar.cnr.it" },
+  { name="Francesco Mandarino", email="mndfnc04a15d005y@studenti.unical.it" },
+  { name="Liliana Martirano", email="liliana.martirano@icar.cnr.it" },
+  { name="Luigi Pontieri", email="luigi.pontieri@icar.cnr.it" },
+]
+description = "A hardware-agnostic library to monitor the computational cost of Machine and Deep Learning algorithms."
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+license = "GPL3"
+license-files = ["LICEN[CS]E*"]
+
+[project.urls]
+Homepage = "https://github.com/Franco7Scala/FLOPpy"
+Issues = "https://github.com/Franco7Scala/FLOPpy/issues"

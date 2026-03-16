@@ -1,10 +1,12 @@
 from __future__ import annotations
-import platform
-import sys
 from dataclasses import dataclass, asdict
 from typing import Any, Dict, Optional
+
+import platform
+import sys
 import psutil
 import torch
+
 
 @dataclass
 class HardwareInfo:
@@ -81,23 +83,24 @@ def get_hardware_info() -> HardwareInfo:
 def format_hardware_info(hw: HardwareInfo) -> str:
     parts = [
         f"OS: {hw.os} ({hw.machine})",
-        f"Python: {hw.python_version}",
+        f"Python: {hw.python_version}"
     ]
 
     if hw.torch_version:
         parts.append(f"PyTorch: {hw.torch_version}")
 
+    #TODO mettere versione sklearn pure
+
     if hw.cpu_cores_logical or hw.cpu_cores_physical:
-        parts.append(
-            f"CPU cores: logical={hw.cpu_cores_logical}, physical={hw.cpu_cores_physical}"
-        )
+        parts.append(f"CPU cores: logical={hw.cpu_cores_logical}, physical={hw.cpu_cores_physical}")
 
     if hw.ram_total_gb is not None:
         parts.append(f"RAM: {hw.ram_total_gb} GB")
 
-    if hw.cuda_available is True:
+    if hw.cuda_available:
         parts.append(f"CUDA: yes (gpus={hw.gpu_count}, name={hw.gpu_name})")
-    elif hw.cuda_available is False:
-        parts.append("CUDA: no")
+
+    elif not hw.cuda_available:
+        parts.append("CUDA: not available")
 
     return " | ".join(parts)

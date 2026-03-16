@@ -1,7 +1,7 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from floppy_tracker import FLOPpyTracker
-from tokenizer_ops import wrap_tokenizer
+from floppy.floppy_tracker import FLOPpyTracker
+from floppy.utils.tokenizer_ops import wrap_tokenizer
 
 
 def main():

@@ -1,7 +1,17 @@
 from __future__ import annotations
 from typing import Any, Callable, Optional
-import numpy as np
 from .base import BaseBackend
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, LogisticRegression, SGDClassifier, SGDRegressor
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.svm import SVC, SVR, LinearSVC, LinearSVR
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, Normalizer
+from sklearn.decomposition import PCA
+
+import numpy as np
+
 
 class SklearnBackend(BaseBackend):
     """
@@ -14,7 +24,6 @@ class SklearnBackend(BaseBackend):
 
     def __init__(self, model, logger=None):
         super().__init__(model, logger=logger)
-
         self._orig_fit: Optional[Callable] = None
         self._orig_predict: Optional[Callable] = None
         self._orig_predict_proba: Optional[Callable] = None
@@ -23,7 +32,6 @@ class SklearnBackend(BaseBackend):
     # ------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------
-
     def start(self):
         if hasattr(self.model, "fit"):
             self._orig_fit = self.model.fit
@@ -44,17 +52,19 @@ class SklearnBackend(BaseBackend):
     def stop(self):
         if self._orig_fit is not None:
             self.model.fit = self._orig_fit
+
         if self._orig_predict is not None:
             self.model.predict = self._orig_predict
+
         if self._orig_predict_proba is not None:
             self.model.predict_proba = self._orig_predict_proba
+
         if self._orig_transform is not None:
             self.model.transform = self._orig_transform
 
     # ------------------------------------------------------------
     # Wrapped methods
     # ------------------------------------------------------------
-
     def _wrap_fit(self, fn: Callable) -> Callable:
         def wrapped(X, y=None, *args, **kwargs):
             result = fn(X, y, *args, **kwargs)
@@ -97,7 +107,6 @@ class SklearnBackend(BaseBackend):
     # ------------------------------------------------------------
     # FLOP accumulation
     # ------------------------------------------------------------
-
     def _accumulate_call(self, flop: int):
         value = int(flop)
         self._last_batch_flop = value
@@ -107,28 +116,10 @@ class SklearnBackend(BaseBackend):
     # ------------------------------------------------------------
     # FLOP estimation
     # ------------------------------------------------------------
-
     def _estimate_fit_flop(self, X: np.ndarray, y: Any) -> int:
         """
         Estimate training FLOP for common sklearn models.
         """
-        try:
-            from sklearn.linear_model import (
-                LinearRegression,
-                Ridge,
-                Lasso,
-                LogisticRegression,
-                SGDClassifier,
-                SGDRegressor,
-            )
-            from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
-            from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-            from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-            from sklearn.svm import SVC, SVR, LinearSVC, LinearSVR
-            from sklearn.cluster import KMeans
-        except ImportError:
-            return 0
-
         if X.ndim != 2:
             return 0
 
@@ -145,6 +136,7 @@ class SklearnBackend(BaseBackend):
             iters = getattr(model, "max_iter", None)
             if iters is None or iters <= 0:
                 iters = 1000
+
             flop = iters * n_samples * n_features
             return int(flop)
 
@@ -153,6 +145,7 @@ class SklearnBackend(BaseBackend):
             iters = getattr(model, "max_iter", 100)
             if iters is None or iters <= 0:
                 iters = 100
+
             n_classes = len(np.unique(y)) if y is not None else 1
             flop = iters * n_samples * n_features * max(n_classes, 1)
             return int(flop)
@@ -165,6 +158,7 @@ class SklearnBackend(BaseBackend):
 
             if y is not None and isinstance(model, SGDClassifier):
                 n_classes = len(np.unique(y))
+
             else:
                 n_classes = 1
 
@@ -191,6 +185,7 @@ class SklearnBackend(BaseBackend):
             iters = getattr(model, "max_iter", 1000)
             if iters is None or iters <= 0:
                 iters = 1000
+
             flop = iters * n_samples * n_features
             return int(flop)
 
@@ -205,33 +200,18 @@ class SklearnBackend(BaseBackend):
             iters = getattr(model, "max_iter", 300)
             if iters is None or iters <= 0:
                 iters = 300
+
             flop = iters * n_samples * n_features * k
             return int(flop)
 
-        return 0
+        raise Exception(f"FLOPs estimation not implemented for {model.__class__.__name__} model type!")
 
     def _estimate_predict_flop(self, X: np.ndarray, y: np.ndarray) -> int:
-        try:
-            from sklearn.linear_model import (
-                LinearRegression,
-                Ridge,
-                Lasso,
-                LogisticRegression,
-                SGDClassifier,
-                SGDRegressor,
-            )
-            from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
-            from sklearn.svm import SVC, SVR, LinearSVC, LinearSVR
-            from sklearn.cluster import KMeans
-        except ImportError:
-            return 0
-
         if X.ndim != 2:
             return 0
 
         n_samples, n_features = X.shape
         n_outputs = 1 if y.ndim == 1 else y.shape[1]
-
         model = self.model
 
         # ---------------- Linear / Logistic / SGD ---------------- #
@@ -274,19 +254,12 @@ class SklearnBackend(BaseBackend):
             flop = 2 * n_samples * n_features * k
             return int(flop)
 
-        return 0
+        raise Exception(f"FLOPs estimation not implemented for {model.__class__.__name__} model type!")
 
     def _estimate_transform_flop(self, X: np.ndarray, Z: np.ndarray) -> int:
         """
         Estimate FLOP for common sklearn transform methods.
         """
-        try:
-            from sklearn.preprocessing import StandardScaler, MinMaxScaler, Normalizer
-            from sklearn.decomposition import PCA
-            from sklearn.cluster import KMeans
-        except ImportError:
-            return 0
-
         if X.ndim != 2:
             return 0
 
@@ -320,4 +293,4 @@ class SklearnBackend(BaseBackend):
             k = getattr(model, "n_clusters", 8)
             return int(2 * n_samples * n_features * k)
 
-        return 0
+        raise Exception(f"FLOPs estimation not implemented for {model.__class__.__name__} model type!")

@@ -1,6 +1,8 @@
 from __future__ import annotations
 from typing import Any, Callable, Optional, Sequence
+
 import torch
+
 
 class TokenizerWithOps:
     """
@@ -50,19 +52,14 @@ class TokenizerWithOps:
 
         if ops > 0:
             self.total_ops += ops
-
             if self.tracker is not None and hasattr(self.tracker, "add_preproc_ops"):
-                try:
-                    self.tracker.add_preproc_ops(ops)
-                except Exception:
-                    pass
+                self.tracker.add_preproc_ops(ops)
 
         return enc
 
     # ------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------
-
     def _normalize_texts(self, texts: Any) -> Sequence[str]:
         """
         Transforms the input into a list of strings for character count estimation. 
@@ -87,17 +84,13 @@ class TokenizerWithOps:
             return 0
 
         n_chars = sum(len(t) for t in texts) if texts else 0
-
         n_tokens = 0
         input_ids = None
-
         if isinstance(enc, dict):
             input_ids = enc.get("input_ids", None)
+
         elif hasattr(enc, "get"):
-            try:
-                input_ids = enc.get("input_ids", None)
-            except Exception:
-                input_ids = None
+            input_ids = enc.get("input_ids", None)
 
         if input_ids is not None:
             if isinstance(input_ids, torch.Tensor):
@@ -106,25 +99,18 @@ class TokenizerWithOps:
             elif isinstance(input_ids, (list, tuple)):
                 if input_ids and isinstance(input_ids[0], (list, tuple)):
                     n_tokens = sum(len(seq) for seq in input_ids)
+
                 else:
                     n_tokens = len(input_ids)
 
         return int(n_chars + n_tokens)
 
 
-def wrap_tokenizer(
-    base_tokenizer: Callable[..., Any],
-    tracker: Optional[Any] = None,
-    cost_model: str = "chars+tokens",
-) -> TokenizerWithOps:
+def wrap_tokenizer(base_tokenizer: Callable[..., Any], tracker: Optional[Any] = None, cost_model: str = "chars+tokens") -> TokenizerWithOps:
     """
     Helper that returns a TokenizerWithOps instance.
     Example:
         base_tok = AutoTokenizer.from_pretrained(...)
         tracked_tok = wrap_tokenizer(base_tok, tracker=tracker)
     """
-    return TokenizerWithOps(
-        base_tokenizer=base_tokenizer,
-        tracker=tracker,
-        cost_model=cost_model,
-    )
+    return TokenizerWithOps(base_tokenizer=base_tokenizer, tracker=tracker, cost_model=cost_model)

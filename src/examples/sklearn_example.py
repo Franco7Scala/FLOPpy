@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.datasets import make_classification
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
-from floppy_tracker import FLOPpyTracker
+from floppy.floppy_tracker import FLOPpyTracker
 
 
 X, y = make_classification(
