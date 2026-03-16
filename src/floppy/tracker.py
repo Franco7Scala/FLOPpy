@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 from backends import create_backend
 from logging import create_logger
 from utils.hooks.training_hooks import TorchTrainingHooks
+from utils.tokenizer_ops import TokenizerWithOps, wrap_tokenizer
 
 
 class Tracker(AbstractContextManager):
@@ -28,23 +29,33 @@ class Tracker(AbstractContextManager):
         wandb_token: Optional[str] = None,
         run_name: Optional[str] = None,
     ):
-        self.logger = create_logger(export_path=export_path, use_wandb=use_wandb, wandb_project=wandb_project, wandb_token=wandb_token, run_name=run_name)
+        self.logger = create_logger(
+            export_path=export_path,
+            use_wandb=use_wandb,
+            wandb_project=wandb_project,
+            wandb_token=wandb_token,
+            run_name=run_name,
+        )
         self.backend = create_backend(model, backend, logger=self.logger)
+
         # Aggregate counters
         self._preproc_ops: int = 0
         self._loss_forward_flop: int = 0
         self._loss_backward_flop: int = 0
         self._optimizer_flop: int = 0
-        # training hooks
+
+        # Training hooks
         self._hooks: Optional[TorchTrainingHooks] = None
+
         # Internal state for debug / future extensibility
         self._last_model_output: Any = None
         self._last_backward_seen: bool = False
         self._last_optimizer_step_seen: bool = False
 
     # ------------------------------------------------------------
-    # Context manager 
+    # Context manager
     # ------------------------------------------------------------
+
     def __enter__(self):
         self.backend.start()
         return self
@@ -55,6 +66,7 @@ class Tracker(AbstractContextManager):
             self._hooks = None
 
         self.backend.stop()
+
         if self.logger is not None and hasattr(self.logger, "log_summary"):
             self.logger.log_summary(self.build_summary_dict())
 
@@ -64,6 +76,7 @@ class Tracker(AbstractContextManager):
     # ------------------------------------------------------------
     # Final metrics
     # ------------------------------------------------------------
+
     @property
     def total_model_flop(self) -> int:
         return int(self.backend.get_total_flop())
@@ -86,11 +99,17 @@ class Tracker(AbstractContextManager):
 
     @property
     def total_overall_flop(self) -> int:
-        return self.total_model_flop + self.total_loss_forward_flop + self.total_loss_backward_flop + self.total_optimizer_flop
+        return (
+            self.total_model_flop
+            + self.total_loss_forward_flop
+            + self.total_loss_backward_flop
+            + self.total_optimizer_flop
+        )
 
     # ------------------------------------------------------------
     # API preprocessing / tokenizer
     # ------------------------------------------------------------
+
     def add_preproc_ops(self, ops: int) -> None:
         if ops is None:
             return
@@ -99,9 +118,25 @@ class Tracker(AbstractContextManager):
         if value > 0:
             self._preproc_ops += value
 
+    def wrap_tokenizer(
+        self,
+        base_tokenizer,
+        cost_model: str = "chars+tokens",
+    ) -> TokenizerWithOps:
+        """
+        Returns a wrapped tokenizer that automatically propagates
+        preprocessing/tokenization operations to this Tracker.
+        """
+        return wrap_tokenizer(
+            base_tokenizer=base_tokenizer,
+            tracker=self,
+            cost_model=cost_model,
+        )
+
     # ------------------------------------------------------------
     # API hooks (torch)
     # ------------------------------------------------------------
+
     def attach_torch_hooks(self, model, loss_fn=None, optimizer=None, enable_debug_print: bool = False) -> None:
         """
         Installs PyTorch hooks for loss and optimizer.
@@ -117,8 +152,9 @@ class Tracker(AbstractContextManager):
         self._hooks.install(model=model, loss_fn=loss_fn, optimizer=optimizer)
 
     # ------------------------------------------------------------
-    # Final Summary 
+    # Final summary
     # ------------------------------------------------------------
+
     def build_summary_dict(self) -> Dict[str, int]:
         return {
             "total_model_flop": self.total_model_flop,
