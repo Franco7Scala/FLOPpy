@@ -554,7 +554,6 @@ class TorchBackend(BaseBackend):
     def _mha_flop(self, layer: nn.MultiheadAttention, inputs):
         q = inputs[0]
         k = inputs[1] if len(inputs) > 1 and inputs[1] is not None else q
-        v = inputs[2] if len(inputs) > 2 and inputs[2] is not None else q
         l, n, e = q.shape
         s = k.shape[0]
         num_heads = layer.num_heads
