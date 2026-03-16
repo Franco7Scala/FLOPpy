@@ -121,6 +121,8 @@ class SklearnBackend(BaseBackend):
         Estimate training FLOP for common sklearn models.
         """
         if X.ndim != 2:
+            # FLOP formulas assume standard tabular input (n_samples, n_features).
+            # For not-2D inputs the cost model is not reliable, so we return 0
             return 0
 
         n_samples, n_features = X.shape
