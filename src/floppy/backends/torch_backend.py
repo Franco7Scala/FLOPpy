@@ -269,6 +269,10 @@ class TorchBackend(BaseBackend):
                 nn.DataParallel,
             ),
         ):
+            # Container modules (structural layers):
+            # These modules define the architecture structure but do not execute
+            # arithmetic operations directly. Their computational cost is already
+            # accounted for by hooks attached to their internal layers.
             flop = 0
 
         self._current_forward_flop += int(flop)
