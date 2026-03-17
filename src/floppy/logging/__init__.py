@@ -2,6 +2,7 @@ from __future__ import annotations
 from .csv_logger import CsvLogger
 from .wandb_logger import WandbLogger
 
+
 class CompositeLogger:
     def __init__(self, loggers):
         self.loggers = [l for l in loggers if l is not None]
@@ -13,6 +14,7 @@ class CompositeLogger:
                 result = logger.log_summary(summary)
             except Exception:
                 pass
+
         return result
 
     def close(self):
@@ -21,6 +23,7 @@ class CompositeLogger:
                 logger.close()
             except Exception:
                 pass
+
 
 def create_logger(
     export_path: str | None = None,

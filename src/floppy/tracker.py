@@ -1,165 +1,156 @@
 from __future__ import annotations
-from contextlib import AbstractContextManager
 from typing import Any, Dict, Optional
-from backends import create_backend
-from logging import create_logger
-from utils.hooks.training_hooks import TorchTrainingHooks
+from torch.optim import Optimizer
+from core import Tracker
+from backends.sklearn_backend import SklearnBackend
+from utils.floppy_report import FLOPpyReport
+from utils.hardware_info import get_hardware_info
 from utils.tokenizer_ops import TokenizerWithOps, wrap_tokenizer
 
 
-class Tracker(AbstractContextManager):
-    """
-    Tracker hook-only.
+class FLOPpyTracker:
 
-    Responsibilities:
-    - Initialize backend e logger
-    - Activate FLOP count of the model by backend
-    - Activate the training hook (loss/optimizer) by TorchTrainingHooks
-    - Maintains the final global counters
-    - Generates the final summary for loggers and reports
-    """
+    def __init__(self, run_name: Optional[str] = None, print_summary: bool = True, print_hardware: bool = False):
+        self.run_name = run_name
+        self.print_summary = print_summary
+        self.print_hardware = print_hardware
+        self._report: Optional[FLOPpyReport] = None
+        self._tracker = None
+        self._model = None
+        self._optimizer: Optional[Optimizer] = None
+        self._loss_fn: Optional[Any] = None
+        self._export_path: Optional[str] = None
+        self._use_wandb: bool = False
+        self._wandb_project: Optional[str] = None
+        self._wandb_token: Optional[str] = None
+        self._hooks_debug_print: bool = False
+        self._hardware: Optional[Dict[str, Any]] = None
 
-    def __init__(
+    @property
+    def report(self) -> FLOPpyReport:
+        if self._report is None:
+            raise RuntimeError("No report available: run training within the context manager before accessing 'report'!")
+
+        return self._report
+
+    def run(
         self,
         model,
-        backend: str = "auto",
+        optimizer: Optional[Optimizer] = None,
+        loss_fn: Optional[Any] = None,
         export_path: Optional[str] = None,
         use_wandb: bool = False,
         wandb_project: Optional[str] = None,
         wandb_token: Optional[str] = None,
-        run_name: Optional[str] = None,
-    ):
-        self.logger = create_logger(
-            export_path=export_path,
-            use_wandb=use_wandb,
-            wandb_project=wandb_project,
-            wandb_token=wandb_token,
-            run_name=run_name,
+        hooks_debug_print: bool = False,
+    ) -> FLOPpyTracker:
+        self._model = model
+        self._optimizer = optimizer
+        self._loss_fn = loss_fn
+        self._export_path = export_path
+        self._use_wandb = use_wandb
+        self._wandb_project = wandb_project
+        self._wandb_token = wandb_token
+        self._hooks_debug_print = hooks_debug_print
+        return self
+
+    def __enter__(self) -> FLOPpyTracker:
+        if self._model is None:
+            raise RuntimeError("run(...) must be called before entering the context manager.")
+
+        if self.print_hardware:
+            self._hardware = get_hardware_info()
+
+        self._tracker = Tracker(
+            model=self._model,
+            backend="auto",
+            export_path=self._export_path,
+            use_wandb=self._use_wandb,
+            wandb_project=self._wandb_project,
+            wandb_token=self._wandb_token,
+            run_name=self.run_name,
         )
-        self.backend = create_backend(model, backend, logger=self.logger)
+        self._tracker.__enter__()
+        if not isinstance(self._tracker.backend, SklearnBackend):
+            self._tracker.attach_torch_hooks(
+                model=self._model,
+                loss_fn=self._loss_fn,
+                optimizer=self._optimizer,
+                enable_debug_print=self._hooks_debug_print,
+            )
 
-        # Aggregate counters
-        self._preproc_ops: int = 0
-        self._loss_forward_flop: int = 0
-        self._loss_backward_flop: int = 0
-        self._optimizer_flop: int = 0
-
-        # Training hooks
-        self._hooks: Optional[TorchTrainingHooks] = None
-
-        # Internal state for debug / future extensibility
-        self._last_model_output: Any = None
-        self._last_backward_seen: bool = False
-        self._last_optimizer_step_seen: bool = False
-
-    # ------------------------------------------------------------
-    # Context manager
-    # ------------------------------------------------------------
-
-    def __enter__(self):
-        self.backend.start()
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        if self._hooks is not None:
-            self._hooks.uninstall()
-            self._hooks = None
+        if self._tracker is not None:
+            self._tracker.__exit__(exc_type, exc, tb)
+            model_flop = int(getattr(self._tracker, "total_model_flop", 0))
+            optimizer_flop = int(getattr(self._tracker, "total_optimizer_flop", 0))
+            loss_forward_flop = int(getattr(self._tracker, "total_loss_forward_flop", 0))
+            loss_backward_flop = int(getattr(self._tracker, "total_loss_backward_flop", 0))
+            preproc_ops = int(getattr(self._tracker, "total_preproc_ops", 0))
+            overall_flop = int(getattr(self._tracker, "total_overall_flop", 0))
+            self._report = FLOPpyReport(
+                run_name=self.run_name,
+                backend=self._tracker.backend.__class__.__name__.replace("Backend", "").lower(),
+                model_flop=model_flop,
+                optimizer_flop=optimizer_flop,
+                loss_forward_flop=loss_forward_flop,
+                loss_backward_flop=loss_backward_flop,
+                preproc_ops=preproc_ops,
+                overall_flop=overall_flop,
+                export_path=self._export_path,
+                use_wandb=self._use_wandb,
+                wandb_project=self._wandb_project,
+                hardware=self._hardware,
+            )
+        if self.print_summary and self._report is not None:
+            self._print_summary()
 
-        self.backend.stop()
+        return False
 
-        if self.logger is not None and hasattr(self.logger, "log_summary"):
-            self.logger.log_summary(self.build_summary_dict())
-
-        if self.logger is not None:
-            self.logger.close()
-
-    # ------------------------------------------------------------
-    # Final metrics
-    # ------------------------------------------------------------
-
-    @property
-    def total_model_flop(self) -> int:
-        return int(self.backend.get_total_flop())
-
-    @property
-    def total_preproc_ops(self) -> int:
-        return int(self._preproc_ops)
-
-    @property
-    def total_loss_forward_flop(self) -> int:
-        return int(self._loss_forward_flop)
-
-    @property
-    def total_loss_backward_flop(self) -> int:
-        return int(self._loss_backward_flop)
-
-    @property
-    def total_optimizer_flop(self) -> int:
-        return int(self._optimizer_flop)
-
-    @property
-    def total_overall_flop(self) -> int:
-        return (
-            self.total_model_flop
-            + self.total_loss_forward_flop
-            + self.total_loss_backward_flop
-            + self.total_optimizer_flop
-        )
-
-    # ------------------------------------------------------------
-    # API preprocessing / tokenizer
-    # ------------------------------------------------------------
-
-    def add_preproc_ops(self, ops: int) -> None:
-        if ops is None:
-            return
-
-        value = int(ops)
-        if value > 0:
-            self._preproc_ops += value
-
-    def wrap_tokenizer(
-        self,
-        base_tokenizer,
-        cost_model: str = "chars+tokens",
-    ) -> TokenizerWithOps:
+    def wrap_tokenizer(self, base_tokenizer, cost_model: str = "chars+tokens") -> TokenizerWithOps:
         """
-        Returns a wrapped tokenizer that automatically propagates
-        preprocessing/tokenization operations to this Tracker.
+        Returns a wrapped tokenizer connected to the internal Tracker.
+
+        Must be called while the context manager is active:
+            with ft.run(...):
+                tok = ft.wrap_tokenizer(base_tokenizer)
         """
+        if self._tracker is None:
+            raise RuntimeError(
+                "wrap_tokenizer(...) requires an active Tracker. "
+                "Use it inside: with FLOPpyTracker(...).run(...) as ft:"
+            )
         return wrap_tokenizer(
             base_tokenizer=base_tokenizer,
-            tracker=self,
+            tracker=self._tracker,
             cost_model=cost_model,
         )
 
-    # ------------------------------------------------------------
-    # API hooks (torch)
-    # ------------------------------------------------------------
+    def _print_summary(self) -> None:
+        rep = self.report
+        run_label = f"[{rep.run_name}]" if rep.run_name else ""
+        if rep.hardware is not None:
+            print(f"[FLOPpyTracker{run_label}] Hardware: {rep.hardware}")
 
-    def attach_torch_hooks(self, model, loss_fn=None, optimizer=None, enable_debug_print: bool = False) -> None:
-        """
-        Installs PyTorch hooks for loss and optimizer.
+        print(f"[FLOPpyTracker{run_label}] model FLOPs: {rep.model_flop}")
+        if rep.loss_forward_flop > 0:
+            print(f"[FLOPpyTracker{run_label}] loss forward FLOPs: {rep.loss_forward_flop}")
 
-        Note:
-        - Model FLOP are counted by the backend.
-        - Loss and optimizer FLOP are counted dynamically by TorchTrainingHooks via UniversalFlopCounter.
-        """
-        if self._hooks is not None:
-            self._hooks.uninstall()
+        if rep.loss_backward_flop > 0:
+            print(f"[FLOPpyTracker{run_label}] loss backward FLOPs: {rep.loss_backward_flop}")
 
-        self._hooks = TorchTrainingHooks(self, enable_debug_print=enable_debug_print)
-        self._hooks.install(model=model, loss_fn=loss_fn, optimizer=optimizer)
+        if rep.optimizer_flop > 0:
+            print(f"[FLOPpyTracker{run_label}] optimizer FLOPs : {rep.optimizer_flop}")
 
-    # ------------------------------------------------------------
-    # Final summary
-    # ------------------------------------------------------------
+        if rep.preproc_ops > 0:
+            print(f"[FLOPpyTracker{run_label}] preprocessing/tokenizer Ops: {rep.preproc_ops}")
 
-    def build_summary_dict(self) -> Dict[str, int]:
-        return {
-            "total_model_flop": self.total_model_flop,
-            "total_optimizer_flop": self.total_optimizer_flop,
-            "total_loss_forward_flop": self.total_loss_forward_flop,
-            "total_loss_backward_flop": self.total_loss_backward_flop,
-            "total_overall_flop": self.total_overall_flop,
-        }
+        print(f"[FLOPpyTracker{run_label}] overall FLOPs: {rep.overall_flop}")
+
+        if rep.export_path:
+            print(f"[FLOPpyTracker{run_label}] Export CSV: {rep.export_path}")
+
+        if rep.use_wandb and rep.wandb_project:
+            print(f"[FLOPpyTracker{run_label}] W&B project: {rep.wandb_project}")

@@ -6,6 +6,7 @@ import platform
 import sys
 import psutil
 import torch
+import sklearn
 
 
 @dataclass
@@ -90,13 +91,9 @@ def format_hardware_info(hw: HardwareInfo) -> str:
         parts.append(f"PyTorch: {hw.torch_version}")
 
     # sklearn version (optional)
-    try:
-        import sklearn
-        sklearn_ver = getattr(sklearn, "__version__", None)
-        if sklearn_ver:
-            parts.append(f"scikit-learn: {sklearn_ver}")
-    except Exception:
-        pass
+    sklearn_ver = getattr(sklearn, "__version__", None)
+    if sklearn_ver:
+        parts.append(f"scikit-learn: {sklearn_ver}")
 
     if hw.cpu_cores_logical or hw.cpu_cores_physical:
         parts.append(
@@ -109,7 +106,7 @@ def format_hardware_info(hw: HardwareInfo) -> str:
     if hw.cuda_available:
         parts.append(f"CUDA: yes (gpus={hw.gpu_count}, name={hw.gpu_name})")
 
-    elif hw.cuda_available is False:
+    else:
         parts.append("CUDA: not available")
 
     return " | ".join(parts)

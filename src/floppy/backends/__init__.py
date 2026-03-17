@@ -1,6 +1,7 @@
 from __future__ import annotations
 from .base import BaseBackend
 
+
 def create_backend(model, backend: str = "auto", logger=None) -> BaseBackend:
     """
     Backend factory with lazy imports.
@@ -18,7 +19,6 @@ def create_backend(model, backend: str = "auto", logger=None) -> BaseBackend:
         try:
             import torch
             from torch.nn import Module
-
             if isinstance(model, Module):
                 from .torch_backend import TorchBackend
                 return TorchBackend(model, logger=logger)
@@ -31,7 +31,6 @@ def create_backend(model, backend: str = "auto", logger=None) -> BaseBackend:
     if backend in ("auto", "sklearn"):
         try:
             from sklearn.base import BaseEstimator
-
             if isinstance(model, BaseEstimator):
                 from .sklearn_backend import SklearnBackend
                 return SklearnBackend(model, logger=logger)

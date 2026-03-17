@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from floppy.floppy_tracker import FLOPpyTracker
+from floppy.tracker import FLOPpyTracker
 
 class TinyNet(nn.Module):
 

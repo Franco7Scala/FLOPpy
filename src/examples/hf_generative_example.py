@@ -1,6 +1,6 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
-from floppy.floppy_tracker import FLOPpyTracker
+from floppy.tracker import FLOPpyTracker
 
 
 model_name = "distilgpt2"

@@ -170,7 +170,6 @@ class SklearnBackend(BaseBackend):
         # ---------------- KNN ---------------- #
         if isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
             algorithm = getattr(model, "algorithm", "auto")
-
             if algorithm == "brute":
                 # dataset ingestion / storage-like cost
                 return int(n_samples * n_features)

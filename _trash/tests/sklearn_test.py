@@ -3,7 +3,7 @@ from sklearn.datasets import make_classification
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
-from floppy.floppy_tracker import FLOPpyTracker
+from floppy.tracker import FLOPpyTracker
 
 
 def test_logistic_regression():
