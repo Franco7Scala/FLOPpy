@@ -101,11 +101,8 @@ class Tracker(AbstractContextManager):
         if value > 0:
             self._preproc_ops += value
 
-    def wrap_tokenizer(self, base_tokenizer, cost_model: str = "chars+tokens") -> TokenizerWithOps:
-        """
-        Returns a wrapped tokenizer that automatically propagates
-        preprocessing/tokenization operations to this Tracker.
-        """
+    def wrap_tokenizer(self, base_tokenizer, cost_model: str = "chars+tokens"):
+        
         return wrap_tokenizer(base_tokenizer=base_tokenizer, tracker=self, cost_model=cost_model)
 
     # ------------------------------------------------------------
