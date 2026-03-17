@@ -1,35 +1,69 @@
 import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from floppy.tracker import FLOPpyTracker
+from floppy import FLOPpyTracker
 
+# ------------------------------------------------------------
+# Shared setup
+# ------------------------------------------------------------
 
 model_name = "distilbert-base-uncased"
+texts = [
+    "FLOP estimation is important for green AI.",
+    "Tracking compute helps improve model efficiency.",
+]
 
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+base_tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+# ============================================================
+# MODE 1
+# ============================================================
 
 model = AutoModelForSequenceClassification.from_pretrained(model_name)
 
-texts = [
-    "FLOP estimation is important for green AI.",
-    "Tracking compute helps improve model efficiency."
-]
-
 tracker = FLOPpyTracker(
-    run_name="hf_transformer_example",
-    print_summary=True
+    run_name="hf_transformer_test",
+    print_summary=True,
+    print_hardware=True,
 )
 
-with tracker.run(
-    model=model,
-    export_path="hf_transformer_example.csv"
-):
+tracker.run(model=model, tokenizer=base_tokenizer)
 
-    inputs = tokenizer(
+inputs = tracker.tokenizer(
+    texts,
+    padding=True,
+    truncation=True,
+    return_tensors="pt",
+)
+
+with torch.no_grad():
+    outputs = model(**inputs)
+
+print(tracker.report())
+
+# ============================================================
+# MODE 2: context manager style
+# ============================================================
+
+model = AutoModelForSequenceClassification.from_pretrained(model_name)
+
+with FLOPpyTracker(
+    run_name="hf_transformer_test_with",
+    print_summary=True,
+    print_hardware=True,
+) as tracker:
+
+    tracker.start(model=model, tokenizer=base_tokenizer)
+
+    inputs = tracker.tokenizer(
         texts,
         padding=True,
         truncation=True,
-        return_tensors="pt"
+        return_tensors="pt",
     )
 
     with torch.no_grad():
         outputs = model(**inputs)
+
+    tracker.stop()
+
+print(tracker.report())
