@@ -19,6 +19,8 @@ class FLOPpyTracker:
         self._model = None
         self._optimizer: Optional[Optimizer] = None
         self._loss_fn: Optional[Any] = None
+        self._base_tokenizer: Optional[Any] = None
+        self._wrapped_tokenizer: Optional[TokenizerWithOps] = None
         self._export_path: Optional[str] = None
         self._use_wandb: bool = False
         self._wandb_project: Optional[str] = None
@@ -32,6 +34,19 @@ class FLOPpyTracker:
             raise RuntimeError("No report available: run training within the context manager before accessing 'report'!")
 
         return self._report
+
+    @property
+    def tokenizer(self):
+        """
+        Returns the wrapped tokenizer connected to the internal Tracker.
+        Must be used inside the context manager and only if a tokenizer was provided in run(...).
+        """
+        if self._wrapped_tokenizer is None:
+            raise RuntimeError(
+                "No tokenizer available. Pass tokenizer=... to run(...) "
+                "and use it inside the context manager."
+            )
+        return self._wrapped_tokenizer
 
     def run(
         self,
