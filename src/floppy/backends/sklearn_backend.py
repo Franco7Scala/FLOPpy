@@ -1,7 +1,15 @@
 from __future__ import annotations
 from typing import Any, Callable, Optional
+import numpy as np
 from .base import BaseBackend
-from sklearn.linear_model import LinearRegression, Ridge, Lasso, LogisticRegression, SGDClassifier, SGDRegressor
+from sklearn.linear_model import (
+    LinearRegression,
+    Ridge,
+    Lasso,
+    LogisticRegression,
+    SGDClassifier,
+    SGDRegressor,
+)
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
@@ -10,8 +18,6 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, Normalizer
 from sklearn.decomposition import PCA
 
-import numpy as np
-
 
 class SklearnBackend(BaseBackend):
     """
@@ -19,7 +25,7 @@ class SklearnBackend(BaseBackend):
 
     Responsibilities:
     - wraps sklearn methods (fit, predict, predict_proba, transform)
-    - estimates model FLOP
+    - estimates model FLOPs
     """
 
     def __init__(self, model, logger=None):
@@ -32,6 +38,7 @@ class SklearnBackend(BaseBackend):
     # ------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------
+
     def start(self):
         if hasattr(self.model, "fit"):
             self._orig_fit = self.model.fit
@@ -65,6 +72,7 @@ class SklearnBackend(BaseBackend):
     # ------------------------------------------------------------
     # Wrapped methods
     # ------------------------------------------------------------
+
     def _wrap_fit(self, fn: Callable) -> Callable:
         def wrapped(X, y=None, *args, **kwargs):
             result = fn(X, y, *args, **kwargs)
@@ -107,6 +115,7 @@ class SklearnBackend(BaseBackend):
     # ------------------------------------------------------------
     # FLOP accumulation
     # ------------------------------------------------------------
+
     def _accumulate_call(self, flop: int):
         value = int(flop)
         self._last_batch_flop = value
@@ -114,15 +123,73 @@ class SklearnBackend(BaseBackend):
         self._batch_idx += 1
 
     # ------------------------------------------------------------
+    # Iteration helpers
+    # ------------------------------------------------------------
+
+    def _fallback_iterations(self, n_samples: int) -> int:
+        """
+        Dynamic fallback when no reliable iteration information is available.
+        Uses a simple dataset-dependent heuristic instead of a fixed constant.
+        """
+        return max(10, int(np.log2(max(n_samples, 2))) * 10)
+
+    def _resolve_effective_iterations(self, model, n_samples: int) -> int:
+        """
+        Resolve the most reliable available estimate for the number of training iterations.
+
+        Priority:
+        1. post-fit n_iter_
+        2. post-fit t_ (mainly for SGD)
+        3. configured max_iter
+        4. dynamic fallback based on dataset size
+        """
+        # 1) Real post-fit iteration count
+        iters = getattr(model, "n_iter_", None)
+        if iters is not None:
+            if isinstance(iters, (list, tuple, np.ndarray)):
+                try:
+                    return max(1, int(np.max(iters)))
+                except Exception:
+                    pass
+            else:
+                try:
+                    return max(1, int(iters))
+                except Exception:
+                    pass
+
+        # 2) SGD-style total update counter
+        t_value = getattr(model, "t_", None)
+        if t_value is not None:
+            try:
+                return max(1, int(t_value))
+            except Exception:
+                pass
+
+        # 3) Configured max_iter
+        max_iter = getattr(model, "max_iter", None)
+        if max_iter is not None:
+            try:
+                max_iter = int(max_iter)
+                if max_iter > 0:
+                    return max_iter
+            except Exception:
+                pass
+
+        # 4) Fallback
+        return self._fallback_iterations(n_samples)
+
+    # ------------------------------------------------------------
     # FLOP estimation
     # ------------------------------------------------------------
+
     def _estimate_fit_flop(self, X: np.ndarray, y: Any) -> int:
         """
-        Estimate training FLOP for common sklearn models.
+        Estimate training FLOPs for common sklearn models.
         """
         if X.ndim != 2:
             # FLOP formulas assume standard tabular input (n_samples, n_features).
-            # For not-2D inputs the cost model is not reliable, so we return 0
+            # For non-2D inputs the analytical cost model is not reliable,
+            # so we conservatively return 0.
             return 0
 
         n_samples, n_features = X.shape
@@ -135,50 +202,39 @@ class SklearnBackend(BaseBackend):
 
         # ---------------- Ridge / Lasso ---------------- #
         if isinstance(model, (Ridge, Lasso)):
-            iters = getattr(model, "max_iter", None)
-            if iters is None or iters <= 0:
-                iters = 1000 #fallback when sklearn does not expose a reliable iteration count
-
+            iters = self._resolve_effective_iterations(model, n_samples)
             flop = iters * n_samples * n_features
             return int(flop)
 
         # ---------------- LogisticRegression ---------------- #
         if isinstance(model, LogisticRegression):
-            iters = getattr(model, "max_iter", 100)
-            if iters is None or iters <= 0:
-                iters = 100
-
+            iters = self._resolve_effective_iterations(model, n_samples)
             n_classes = len(np.unique(y)) if y is not None else 1
             flop = iters * n_samples * n_features * max(n_classes, 1)
             return int(flop)
 
         # ---------------- SGDClassifier / SGDRegressor ---------------- #
         if isinstance(model, (SGDClassifier, SGDRegressor)):
-            iters = getattr(model, "max_iter", 1000)
-            if iters is None or iters <= 0:
-                iters = 1000
+            iters = self._resolve_effective_iterations(model, n_samples)
 
             if y is not None and isinstance(model, SGDClassifier):
                 n_classes = len(np.unique(y))
-
             else:
                 n_classes = 1
 
-            flop = iters * n_samples * n_features * max(n_classes, 1)
+            flop = iters * n_features * max(n_classes, 1)
             return int(flop)
 
         # ---------------- KNN ---------------- #
         if isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
             algorithm = getattr(model, "algorithm", "auto")
+
             if algorithm == "brute":
-                # dataset ingestion / storage-like cost
                 return int(n_samples * n_features)
 
             if algorithm in ("kd_tree", "ball_tree"):
-                # tree construction cost approximation
                 return int(n_samples * n_features * np.log2(max(n_samples, 2)))
 
-            # auto fallback
             return int(n_samples * n_features)
 
         # ---------------- Decision Tree ---------------- #
@@ -194,10 +250,7 @@ class SklearnBackend(BaseBackend):
 
         # ---------------- Linear SVM ---------------- #
         if isinstance(model, (LinearSVC, LinearSVR)):
-            iters = getattr(model, "max_iter", 1000)
-            if iters is None or iters <= 0:
-                iters = 1000
-
+            iters = self._resolve_effective_iterations(model, n_samples)
             flop = iters * n_samples * n_features
             return int(flop)
 
@@ -209,10 +262,7 @@ class SklearnBackend(BaseBackend):
         # ---------------- KMeans ---------------- #
         if isinstance(model, KMeans):
             k = getattr(model, "n_clusters", 8)
-            iters = getattr(model, "max_iter", 300)
-            if iters is None or iters <= 0:
-                iters = 300
-
+            iters = self._resolve_effective_iterations(model, n_samples)
             flop = iters * n_samples * n_features * k
             return int(flop)
 
@@ -270,7 +320,7 @@ class SklearnBackend(BaseBackend):
 
     def _estimate_transform_flop(self, X: np.ndarray, Z: np.ndarray) -> int:
         """
-        Estimate FLOP for common sklearn transform methods.
+        Estimate FLOPs for common sklearn transform methods.
         """
         if X.ndim != 2:
             return 0
