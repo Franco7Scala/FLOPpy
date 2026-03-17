@@ -1,46 +1,59 @@
 import numpy as np
 from sklearn.datasets import make_classification
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from floppy.tracker import FLOPpyTracker
+from sklearn.ensemble import RandomForestClassifier
+from floppy import FLOPpyTracker
 
+# ------------------------------------------------------------
+# Shared setup
+# ------------------------------------------------------------
 
 X, y = make_classification(
     n_samples=300,
     n_features=20,
-    random_state=0
+    n_informative=10,
+    n_redundant=2,
+    random_state=42,
 )
 
-model = LogisticRegression(max_iter=100)
+X_train, y_train = X[:200], y[:200]
+X_test, y_test = X[200:], y[200:]
+
+# ============================================================
+# MODE 1
+# ============================================================
+
+model = RandomForestClassifier(n_estimators=100)
 
 tracker = FLOPpyTracker(
-    run_name="sklearn_example",
-    print_summary=True
+    run_name="sklearn_test",
+    print_summary=True,
+    print_hardware=True,
 )
 
-with tracker.run(
-    model=model,
-    export_path="sklearn_example.csv"
-):
+tracker.run(model=model)
 
-    model.fit(X, y)
+model.fit(X_train, y_train)
+preds = model.predict(X_test)
 
-    preds = model.predict(X)
+print(tracker.report())
 
+# ============================================================
+# MODE 2: context manager style
+# ============================================================
 
-X = np.random.randn(200, 10)
+model = RandomForestClassifier(n_estimators=100)
 
-scaler = StandardScaler()
+with FLOPpyTracker(
+    run_name="sklearn_test_with",
+    print_summary=True,
+    print_hardware=True,
+) as tracker:
 
-tracker = FLOPpyTracker(
-    run_name="sklearn_transform_example",
-    print_summary=True
-)
+    tracker.start(model=model)
 
-with tracker.run(
-    model=scaler,
-):
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
 
-    scaler.fit(X)
+    tracker.stop()
 
-    X_scaled = scaler.transform(X)
+print(tracker.report())
