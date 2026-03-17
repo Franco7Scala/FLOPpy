@@ -1,22 +1,41 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "FLOPpy"
+name = "floppy"
 version = "0.1.0"
+description = "A hardware-agnostic python library to monitor the computational cost of Machine and Deep Learning algorithms"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "GPL-3.0-only"}
 authors = [
   { name="Francesco Scala", email="francesco.scala@icar.cnr.it" },
   { name="Francesco Mandarino", email="mndfnc04a15d005y@studenti.unical.it" },
   { name="Liliana Martirano", email="liliana.martirano@icar.cnr.it" },
   { name="Luigi Pontieri", email="luigi.pontieri@icar.cnr.it" },
 ]
-description = "A hardware-agnostic library to monitor the computational cost of Machine and Deep Learning algorithms."
-readme = "README.md"
-requires-python = ">=3.10"
+keywords = ["Green AI", "Benchmarking", "Hardware-agnostic", "Machine Learning", "Deep learning"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
-license = "GPL3"
-license-files = ["LICEN[CS]E*"]
+
+dependencies = [
+    "numpy>=2.4.3",
+    "psutil>=7.2.2",
+    "scikit-learn>=1.8.0",
+    "torch>=2.2.2",
+    "transformers>=4.57.1",
+    "wandb>=0.25.1",
+]
 
 [project.urls]
 Homepage = "https://github.com/Franco7Scala/FLOPpy"
-Issues = "https://github.com/Franco7Scala/FLOPpy/issues"
+"Bug Tracker" = "https://github.com/Franco7Scala/FLOPpy/issues"
+Documentation = "https://github.com/Franco7Scala/FLOPpy/tree/main/documentation"
+
+[tool.setuptools.packages.find]
+where = ["src"]
