@@ -1,53 +1,66 @@
 import torch
 import torch.nn as nn
-from floppy.tracker import FLOPpyTracker
+from floppy import FLOPpyTracker
 
-class TinyNet(nn.Module):
+# ------------------------------------------------------------
+# Shared setup
+# ------------------------------------------------------------
 
-    def __init__(self):
-        super().__init__()
+input_data = torch.randn(32, 10)
+labels = torch.randint(0, 10, (32,))
 
-        self.net = nn.Sequential(
-            nn.Linear(20, 32),
-            nn.ReLU(),
-            nn.Linear(32, 4),
-        )
+# ============================================================
+# MODE 1
+# ============================================================
 
-    def forward(self, x):
-        return self.net(x)
-
-
-model = TinyNet()
-
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-
-loss_fn = nn.CrossEntropyLoss()
-
-x = torch.randn(32, 20)
-y = torch.randint(0, 4, (32,))
-
-tracker = FLOPpyTracker(
-    run_name="torch_training_example",
-    print_summary=True
+model = nn.Sequential(
+    nn.Linear(10, 10),
+    nn.ReLU(),
 )
 
-with tracker.run(
-    model=model,
-    optimizer=optimizer,
-    loss_fn=loss_fn,
-    export_path="torch_training_example.csv"
-):
+loss_fn = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters())
 
-    model.train()
+tracker = FLOPpyTracker(
+    run_name="pytorch_experiment",
+    print_summary=True,
+    print_hardware=True,
+)
 
-    for _ in range(5):
+tracker.run(model=model, optimizer=optimizer, loss_fn=loss_fn)
 
-        optimizer.zero_grad()
+y_hat = model(input_data)
+loss = loss_fn(y_hat, labels)
+loss.backward()
+optimizer.step()
 
-        out = model(x)
+print(tracker.report())
 
-        loss = loss_fn(out, y)
+# ============================================================
+# MODE 2: context manager style
+# ============================================================
 
-        loss.backward()
+model = nn.Sequential(
+    nn.Linear(10, 10),
+    nn.ReLU(),
+)
 
-        optimizer.step()
+loss_fn = nn.CrossEntropyLoss()
+optimizer = torch.optim.Adam(model.parameters())
+
+with FLOPpyTracker(
+    run_name="pytorch_experiment_with",
+    print_summary=True,
+    print_hardware=True,
+) as tracker:
+
+    tracker.start(model=model, optimizer=optimizer, loss_fn=loss_fn)
+
+    y_hat = model(input_data)
+    loss = loss_fn(y_hat, labels)
+    loss.backward()
+    optimizer.step()
+
+    tracker.stop()
+
+print(tracker.report())
