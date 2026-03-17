@@ -21,6 +21,9 @@ class TorchTrainingHooks:
         self._loss_forward_counter: Optional[UniversalFlopCounter] = None
         self._loss_backward_counter: Optional[UniversalFlopCounter] = None
         self._optimizer_counter: Optional[UniversalFlopCounter] = None
+        self._loss_forward_active = False
+        self._loss_backward_active = False
+        self._optimizer_active = False
 
     # ------------------------------------------------------------
     # API
