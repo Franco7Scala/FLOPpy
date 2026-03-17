@@ -38,6 +38,7 @@ class FLOPpyTracker:
         model,
         optimizer: Optional[Optimizer] = None,
         loss_fn: Optional[Any] = None,
+        tokenizer: Optional[Any] = None,
         export_path: Optional[str] = None,
         use_wandb: bool = False,
         wandb_project: Optional[str] = None,
@@ -47,6 +48,8 @@ class FLOPpyTracker:
         self._model = model
         self._optimizer = optimizer
         self._loss_fn = loss_fn
+        self._base_tokenizer = tokenizer
+        self._wrapped_tokenizer = None
         self._export_path = export_path
         self._use_wandb = use_wandb
         self._wandb_project = wandb_project
@@ -71,6 +74,8 @@ class FLOPpyTracker:
             run_name=self.run_name,
         )
         self._tracker.__enter__()
+        if self._base_tokenizer is not None:
+            self._wrapped_tokenizer = self._tracker.wrap_tokenizer(self._base_tokenizer)
         if not isinstance(self._tracker.backend, SklearnBackend):
             self._tracker.attach_torch_hooks(
                 model=self._model,
