@@ -1,13 +1,32 @@
 from __future__ import annotations
 from typing import Any, Dict, Optional
 from torch.optim import Optimizer
-from core import Tracker
-from backends.sklearn_backend import SklearnBackend
-from utils.floppy_report import FLOPpyReport
-from utils.hardware_info import get_hardware_info
-from utils.tokenizer_ops import TokenizerWithOps
+from .core import Tracker
+from .backends.sklearn_backend import SklearnBackend
+from .utils.floppy_report import FLOPpyReport
+from .utils.hardware_info import get_hardware_info
+from .utils.tokenizer_ops import TokenizerWithOps
 
 
+class FLOPpyTracker:
+    """
+    Tracker for monitoring FLOPs in machine and deep learning models.
+
+    This class provides functionality to track floating-point operations (FLOPs)
+    for models, optimizers, loss functions and tokenizers during training or inference.
+    It supports integration with Weights & Biases for logging and can export reports.
+
+    Attributes:
+        run_name (Optional[str]): Name of the run for identification.
+        print_summary (bool): Whether to print a summary after stopping.
+        print_hardware (bool): Whether to print hardware information.
+
+    Methods:
+        run(...): Configure and immediately start monitoring.
+        start(...): Start monitoring.
+        stop(): Stop monitoring and generate the report.
+        report(): Get the final report.
+    """
 class FLOPpyTracker:
     def __init__(self, run_name: Optional[str] = None, print_summary: bool = True, print_hardware: bool = False):
         self.run_name = run_name
@@ -27,7 +46,6 @@ class FLOPpyTracker:
         self._hooks_debug_print: bool = False
         self._hardware: Optional[Dict[str, Any]] = None
         self._is_active: bool = False
-        self._summary_printed: bool = False
 
     @property
     def tokenizer(self) -> TokenizerWithOps:
@@ -116,7 +134,6 @@ class FLOPpyTracker:
             raise RuntimeError("A model must be provided before starting monitoring.")
 
         self._report = None
-        self._summary_printed = False
         self._wrapped_tokenizer = None
 
         if self.print_hardware:
@@ -155,7 +172,7 @@ class FLOPpyTracker:
 
     def stop(self) -> FLOPpyTracker:
         """
-        Stop monitoring and build the final report.
+        Stop monitoring.
         Safe to call multiple times.
         """
         if not self._is_active:
@@ -164,47 +181,38 @@ class FLOPpyTracker:
         if self._tracker is not None:
             self._tracker.__exit__(None, None, None)
 
-            model_flop = int(getattr(self._tracker, "total_model_flop", 0))
-            optimizer_flop = int(getattr(self._tracker, "total_optimizer_flop", 0))
-            loss_forward_flop = int(getattr(self._tracker, "total_loss_forward_flop", 0))
-            loss_backward_flop = int(getattr(self._tracker, "total_loss_backward_flop", 0))
-            preproc_ops = int(getattr(self._tracker, "total_preproc_ops", 0))
-            overall_flop = int(getattr(self._tracker, "total_overall_flop", 0))
-
-            self._report = FLOPpyReport(
-                run_name=self.run_name,
-                backend=self._tracker.backend.__class__.__name__.replace("Backend", "").lower(),
-                model_flop=model_flop,
-                optimizer_flop=optimizer_flop,
-                loss_forward_flop=loss_forward_flop,
-                loss_backward_flop=loss_backward_flop,
-                preproc_ops=preproc_ops,
-                overall_flop=overall_flop,
-                export_path=self._export_path,
-                use_wandb=self._use_wandb,
-                wandb_project=self._wandb_project,
-                hardware=self._hardware,
-            )
-
-        self._tracker = None
-        self._is_active = False
-
-        if self.print_summary and self._report is not None and not self._summary_printed:
+        if self.print_summary:
+            self.report()
             self._print_summary()
-            self._summary_printed = True
 
+        self._is_active = False
         return self
 
     def report(self) -> FLOPpyReport:
         """
-        Return the final report.
-        If monitoring is still active, stop it first.
+        Returns a report.
         """
-        if self._is_active:
-            self.stop()
+        model_flop = int(getattr(self._tracker, "total_model_flop", 0))
+        optimizer_flop = int(getattr(self._tracker, "total_optimizer_flop", 0))
+        loss_forward_flop = int(getattr(self._tracker, "total_loss_forward_flop", 0))
+        loss_backward_flop = int(getattr(self._tracker, "total_loss_backward_flop", 0))
+        preproc_ops = int(getattr(self._tracker, "total_preproc_ops", 0))
+        overall_flop = int(getattr(self._tracker, "total_overall_flop", 0))
 
-        if self._report is None:
-            raise RuntimeError("No report available: start/run monitoring before requesting the report.")
+        self._report = FLOPpyReport(
+            run_name=self.run_name,
+            backend=self._tracker.backend.__class__.__name__.replace("Backend", "").lower(),
+            model_flop=model_flop,
+            optimizer_flop=optimizer_flop,
+            loss_forward_flop=loss_forward_flop,
+            loss_backward_flop=loss_backward_flop,
+            preproc_ops=preproc_ops,
+            overall_flop=overall_flop,
+            export_path=self._export_path,
+            use_wandb=self._use_wandb,
+            wandb_project=self._wandb_project,
+            hardware=self._hardware,
+        )
 
         return self._report
 
@@ -227,25 +235,15 @@ class FLOPpyTracker:
     # Manual tokenizer wrapping (optional helper)
     # ------------------------------------------------------------
 
-    def wrap_tokenizer(
-        self,
-        base_tokenizer,
-        cost_model: str = "chars+tokens",
-    ) -> TokenizerWithOps:
+    def _wrap_tokenizer(self, base_tokenizer, cost_model: str = "chars+tokens") -> TokenizerWithOps:
         """
         Optional helper for manual tokenizer wrapping.
         Requires an active internal Tracker.
         """
         if self._tracker is None:
-            raise RuntimeError(
-                "wrap_tokenizer(...) requires an active Tracker. "
-                "Use start(...) or run(...) first."
-            )
+            raise RuntimeError("wrap_tokenizer(...) requires an active Tracker. Use start(...) or run(...) first.")
 
-        return self._tracker.wrap_tokenizer(
-            base_tokenizer=base_tokenizer,
-            cost_model=cost_model,
-        )
+        return self._tracker.wrap_tokenizer(base_tokenizer=base_tokenizer, cost_model=cost_model)
 
     # ------------------------------------------------------------
     # Printing

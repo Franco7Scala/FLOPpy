@@ -1,5 +1,5 @@
 from __future__ import annotations
-from base_logger import BaseLogger
+from .base_logger import BaseLogger
 
 import csv
 

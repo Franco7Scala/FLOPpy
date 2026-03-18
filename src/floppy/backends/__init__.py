@@ -1,5 +1,9 @@
 from __future__ import annotations
 from .base import BaseBackend
+from torch.nn import Module
+from sklearn.base import BaseEstimator
+
+import torch
 
 
 def create_backend(model, backend: str = "auto", logger=None) -> BaseBackend:
@@ -16,29 +20,14 @@ def create_backend(model, backend: str = "auto", logger=None) -> BaseBackend:
 
     # ---------- PyTorch ---------- #
     if backend in ("auto", "torch"):
-        try:
-            import torch
-            from torch.nn import Module
-            if isinstance(model, Module):
-                from .torch_backend import TorchBackend
-                return TorchBackend(model, logger=logger)
-
-        except ImportError:
-            if backend == "torch":
-                raise
+        if isinstance(model, Module):
+            from .torch_backend import TorchBackend
+            return TorchBackend(model, logger=logger)
 
     # ---------- Scikit-learn ---------- #
     if backend in ("auto", "sklearn"):
-        try:
-            from sklearn.base import BaseEstimator
-            if isinstance(model, BaseEstimator):
-                from .sklearn_backend import SklearnBackend
-                return SklearnBackend(model, logger=logger)
+        if isinstance(model, BaseEstimator):
+            from .sklearn_backend import SklearnBackend
+            return SklearnBackend(model, logger=logger)
 
-        except ImportError:
-            if backend == "sklearn":
-                raise
-
-    raise ValueError(
-        f"Unable to determine backend for model type {type(model)} with backend='{backend}'."
-    )
+    raise ValueError(f"Unable to determine backend for model type {type(model)} with backend='{backend}'!")
