@@ -140,9 +140,9 @@ class SklearnBackend(BaseBackend):
         Priority:
         1. post-fit n_iter_
         2. post-fit t_ (mainly for SGD)
-        3. configured max_iter
-        4. dynamic fallback based on dataset size
+        3. dynamic fallback based on dataset size
         """
+        # 1) Real post-fit iteration count 
         iters = getattr(model, "n_iter_", None)
         if iters is not None:
             if isinstance(iters, (list, tuple, np.ndarray)):
@@ -156,6 +156,7 @@ class SklearnBackend(BaseBackend):
                 except Exception:
                     pass
 
+        # 2) SGD-style total update counter
         t_value = getattr(model, "t_", None)
         if t_value is not None:
             try:
@@ -163,15 +164,7 @@ class SklearnBackend(BaseBackend):
             except Exception:
                 pass
 
-        max_iter = getattr(model, "max_iter", None)
-        if max_iter is not None:
-            try:
-                max_iter = int(max_iter)
-                if max_iter > 0:
-                    return max_iter
-            except Exception:
-                pass
-
+        # dynamic fallback
         return self._fallback_iterations(n_samples)
 
     # ------------------------------------------------------------
