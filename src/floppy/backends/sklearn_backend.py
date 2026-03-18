@@ -143,7 +143,6 @@ class SklearnBackend(BaseBackend):
         3. configured max_iter
         4. dynamic fallback based on dataset size
         """
-        # 1) Real post-fit iteration count
         iters = getattr(model, "n_iter_", None)
         if iters is not None:
             if isinstance(iters, (list, tuple, np.ndarray)):
@@ -157,7 +156,6 @@ class SklearnBackend(BaseBackend):
                 except Exception:
                     pass
 
-        # 2) SGD-style total update counter
         t_value = getattr(model, "t_", None)
         if t_value is not None:
             try:
@@ -165,7 +163,6 @@ class SklearnBackend(BaseBackend):
             except Exception:
                 pass
 
-        # 3) Configured max_iter
         max_iter = getattr(model, "max_iter", None)
         if max_iter is not None:
             try:
@@ -175,8 +172,42 @@ class SklearnBackend(BaseBackend):
             except Exception:
                 pass
 
-        # 4) Fallback
         return self._fallback_iterations(n_samples)
+
+    # ------------------------------------------------------------
+    # Tree helpers
+    # ------------------------------------------------------------
+
+    def _resolve_tree_depth(self, model, n_samples: int) -> int:
+        """
+        Resolve a reasonable depth estimate for tree-based models.
+        """
+        if hasattr(model, "get_depth"):
+            try:
+                return max(1, int(model.get_depth()))
+            except Exception:
+                pass
+
+        return max(1, int(np.log2(max(n_samples, 2))))
+
+    def _resolve_forest_avg_depth(self, model, n_samples: int) -> int:
+        """
+        Resolve the average tree depth for a fitted forest, with fallback.
+        """
+        depths = []
+        estimators = getattr(model, "estimators_", None)
+        if estimators is not None:
+            for est in estimators:
+                if hasattr(est, "get_depth"):
+                    try:
+                        depths.append(est.get_depth())
+                    except Exception:
+                        pass
+
+        if depths:
+            return max(1, int(np.mean(depths)))
+
+        return max(1, int(np.log2(max(n_samples, 2))))
 
     # ------------------------------------------------------------
     # FLOP estimation
@@ -222,6 +253,7 @@ class SklearnBackend(BaseBackend):
             else:
                 n_classes = 1
 
+            # t_ already represents update steps, so we do not multiply by n_samples again
             flop = iters * n_features * max(n_classes, 1)
             return int(flop)
 
@@ -270,6 +302,7 @@ class SklearnBackend(BaseBackend):
 
     def _estimate_predict_flop(self, X: np.ndarray, y: np.ndarray) -> int:
         if X.ndim != 2:
+            # Predict formulas assume standard tabular input (n_samples, n_features).
             return 0
 
         n_samples, n_features = X.shape
@@ -300,7 +333,21 @@ class SklearnBackend(BaseBackend):
                 n_train = model._fit_X.shape[0]
             if n_train is None:
                 return 0
+
             flop = 2 * int(n_train) * n_features * n_samples
+            return int(flop)
+
+        # ---------------- Decision Tree predict ---------------- #
+        if isinstance(model, (DecisionTreeClassifier, DecisionTreeRegressor)):
+            depth = self._resolve_tree_depth(model, n_samples)
+            flop = n_samples * depth
+            return int(flop)
+
+        # ---------------- Random Forest predict ---------------- #
+        if isinstance(model, (RandomForestClassifier, RandomForestRegressor)):
+            n_trees = getattr(model, "n_estimators", 100)
+            avg_depth = self._resolve_forest_avg_depth(model, n_samples)
+            flop = n_trees * n_samples * avg_depth
             return int(flop)
 
         # ---------------- Kernel SVM ---------------- #
@@ -323,6 +370,7 @@ class SklearnBackend(BaseBackend):
         Estimate FLOPs for common sklearn transform methods.
         """
         if X.ndim != 2:
+            # Transform formulas assume standard tabular input (n_samples, n_features).
             return 0
 
         n_samples, n_features = X.shape
