@@ -27,67 +27,53 @@ class TorchTrainingHooks:
     def install(self, *, model, loss_fn=None, optimizer=None) -> None:
         try:
             self.handles.model_fwd_handle = model.register_forward_hook(self._hook_model_forward)
+
         except Exception:
-            cprint(
-                "[training_hooks] Warning: model forward hook registration failed. Model forward FLOP will not be counted.",
-                Color.WARNING,
-            )
+            cprint("[training_hooks] Warning: model forward hook registration failed. Model forward FLOP will not be counted.", Color.WARNING)
             self.handles.model_fwd_handle = None
 
         if loss_fn is not None:
             try:
                 self.handles.loss_fwd_pre_handle = loss_fn.register_forward_pre_hook(self._hook_loss_forward_pre)
+
             except Exception:
-                cprint(
-                    "[training_hooks] Warning: loss forward pre-hook registration failed. Loss forward FLOP will not be counted.",
-                    Color.WARNING,
-                )
+                cprint("[training_hooks] Warning: loss forward pre-hook registration failed. Loss forward FLOP will not be counted.", Color.WARNING)
                 self.handles.loss_fwd_pre_handle = None
 
             try:
                 self.handles.loss_fwd_post_handle = loss_fn.register_forward_hook(self._hook_loss_forward)
+
             except Exception:
-                cprint(
-                    "[training_hooks] Warning: loss forward post-hook registration failed. Loss forward FLOP will not be counted.",
-                    Color.WARNING,
-                )
+                cprint("[training_hooks] Warning: loss forward post-hook registration failed. Loss forward FLOP will not be counted.", Color.WARNING)
                 self.handles.loss_fwd_post_handle = None
 
             try:
                 self.handles.loss_bwd_pre_handle = loss_fn.register_full_backward_pre_hook(self._hook_loss_backward_pre)
+
             except Exception:
-                cprint(
-                    "[training_hooks] Warning: loss backward pre-hook registration failed. Loss backward FLOP will not be counted.",
-                    Color.WARNING,
-                )
+                cprint("[training_hooks] Warning: loss backward pre-hook registration failed. Loss backward FLOP will not be counted.", Color.WARNING)
                 self.handles.loss_bwd_pre_handle = None
 
             try:
                 self.handles.loss_bwd_post_handle = loss_fn.register_full_backward_hook(self._hook_loss_backward)
+
             except Exception:
-                cprint(
-                    "[training_hooks] Warning: loss backward post-hook registration failed. Loss backward FLOP will not be counted.",
-                    Color.WARNING,
-                )
+                cprint("[training_hooks] Warning: loss backward post-hook registration failed. Loss backward FLOP will not be counted.", Color.WARNING)
                 self.handles.loss_bwd_post_handle = None
 
         if optimizer is not None:
             try:
                 self.handles.opt_step_pre_handle = optimizer.register_step_pre_hook(self._hook_optimizer_step_pre)
+
             except Exception:
-                cprint(
-                    "[training_hooks] Warning: optimizer step pre-hook registration failed. Optimizer FLOP will not be counted.",
-                    Color.WARNING,
-                )
+                cprint("[training_hooks] Warning: optimizer step pre-hook registration failed. Optimizer FLOP will not be counted.", Color.WARNING)
                 self.handles.opt_step_pre_handle = None
 
             try:
                 self.handles.opt_step_post_handle = optimizer.register_step_post_hook(self._hook_optimizer_step_post)
+
             except Exception:
-                cprint(
-                    "[training_hooks] Warning: optimizer step post-hook registration failed. Optimizer FLOP will not be counted.",
-                    Color.WARNING,
-                )
+                cprint("[training_hooks] Warning: optimizer step post-hook registration failed. Optimizer FLOP will not be counted.", Color.WARNING)
                 self.handles.opt_step_post_handle = None
 
     def uninstall(self) -> None:

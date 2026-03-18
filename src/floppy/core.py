@@ -102,7 +102,6 @@ class Tracker(AbstractContextManager):
             self._preproc_ops += value
 
     def wrap_tokenizer(self, base_tokenizer, cost_model: str = "chars+tokens"):
-        
         return wrap_tokenizer(base_tokenizer=base_tokenizer, tracker=self, cost_model=cost_model)
 
     # ------------------------------------------------------------

@@ -1,15 +1,7 @@
 from __future__ import annotations
 from typing import Any, Callable, Optional
-import numpy as np
 from .base import BaseBackend
-from sklearn.linear_model import (
-    LinearRegression,
-    Ridge,
-    Lasso,
-    LogisticRegression,
-    SGDClassifier,
-    SGDRegressor,
-)
+from sklearn.linear_model import LinearRegression, Ridge, Lasso, LogisticRegression, SGDClassifier, SGDRegressor
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
@@ -17,6 +9,8 @@ from sklearn.svm import SVC, SVR, LinearSVC, LinearSVR
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, Normalizer
 from sklearn.decomposition import PCA
+
+import numpy as np
 
 
 class SklearnBackend(BaseBackend):
@@ -146,23 +140,15 @@ class SklearnBackend(BaseBackend):
         iters = getattr(model, "n_iter_", None)
         if iters is not None:
             if isinstance(iters, (list, tuple, np.ndarray)):
-                try:
-                    return max(1, int(np.max(iters)))
-                except Exception:
-                    pass
+                return max(1, int(np.max(iters)))
+
             else:
-                try:
-                    return max(1, int(iters))
-                except Exception:
-                    pass
+               return max(1, int(iters))
 
         # 2) SGD-style total update counter
         t_value = getattr(model, "t_", None)
         if t_value is not None:
-            try:
-                return max(1, int(t_value))
-            except Exception:
-                pass
+            return max(1, int(t_value))
 
         # dynamic fallback
         return self._fallback_iterations(n_samples)
@@ -176,10 +162,7 @@ class SklearnBackend(BaseBackend):
         Resolve a reasonable depth estimate for tree-based models.
         """
         if hasattr(model, "get_depth"):
-            try:
-                return max(1, int(model.get_depth()))
-            except Exception:
-                pass
+            return max(1, int(model.get_depth()))
 
         return max(1, int(np.log2(max(n_samples, 2))))
 
@@ -192,10 +175,7 @@ class SklearnBackend(BaseBackend):
         if estimators is not None:
             for est in estimators:
                 if hasattr(est, "get_depth"):
-                    try:
-                        depths.append(est.get_depth())
-                    except Exception:
-                        pass
+                    depths.append(est.get_depth())
 
         if depths:
             return max(1, int(np.mean(depths)))

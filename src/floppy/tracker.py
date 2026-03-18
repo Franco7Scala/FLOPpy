@@ -9,12 +9,7 @@ from utils.tokenizer_ops import TokenizerWithOps
 
 
 class FLOPpyTracker:
-    def __init__(
-        self,
-        run_name: Optional[str] = None,
-        print_summary: bool = True,
-        print_hardware: bool = False,
-    ):
+    def __init__(self, run_name: Optional[str] = None, print_summary: bool = True, print_hardware: bool = False):
         self.run_name = run_name
         self.print_summary = print_summary
         self.print_hardware = print_hardware
@@ -41,9 +36,8 @@ class FLOPpyTracker:
         Available only after start/run if a tokenizer was provided.
         """
         if self._wrapped_tokenizer is None:
-            raise RuntimeError(
-                "No tokenizer available. Pass tokenizer=... to start(...) or run(...)."
-            )
+            raise RuntimeError("No tokenizer available. Pass tokenizer=... to run(...).")
+
         return self._wrapped_tokenizer
 
     # ------------------------------------------------------------
