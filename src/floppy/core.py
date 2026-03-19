@@ -132,3 +132,13 @@ class Tracker(AbstractContextManager):
             "total_loss_backward_flop": self.total_loss_backward_flop,
             "total_overall_flop": self.total_overall_flop,
         }
+
+    def build_progress_dict(self) -> Dict[str, int]:
+        return {
+            "total_model_flop": self.total_model_flop,
+            "total_optimizer_flop": self.total_optimizer_flop,
+            "total_loss_forward_flop": self.total_loss_forward_flop,
+            "total_loss_backward_flop": self.total_loss_backward_flop,
+            "total_preproc_ops": self.total_preproc_ops,
+            "total_overall_flop": self.total_overall_flop,
+        }
