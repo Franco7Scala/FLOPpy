@@ -9,8 +9,8 @@ class FLOPpyReport:
     run_name: Optional[str]
     model_architecture: Optional[str]
     model_device: Optional[str]
-    loss_type: Optional[str]
-    optimizer_type: Optional[str]
+    #loss_type: Optional[str]
+    #optimizer_type: Optional[str]
     backend: str
     model_flop: int
     optimizer_flop: int
@@ -37,31 +37,32 @@ class FLOPpyReport:
 
             return f"{float_flops:.2f} {units[unit_idx]}"
 
+        result = ""
         run_label = f"'{self.run_name}'" if self.run_name else ""
-        print("=" * 70)
-        print(f" FLOPpyTracker Summary{run_label}")
-        print("=" * 70)
+        result += "=" * 70
+        result += f" FLOPpyTracker Summary{run_label}"
+        result += "=" * 70
         # Hardware Info
         if self.hardware is not None:
             h = self.hardware
-            print("Hardware Environment:")
+            result += "Hardware Environment:"
             # System & RAM
             ram_str = f"{h.ram_total_gb:.0f} GB RAM" if h.ram_total_gb else "Unknown RAM"
-            print(f"  - System   : {h.os} ({h.machine}) | {ram_str}")
+            result += f"  - System   : {h.os} ({h.machine}) | {ram_str}"
             # CPU Details
             c_name = getattr(h, "cpu_name", None) or h.processor or "Unknown CPU"
             cores_str = f"{h.cpu_cores_physical} Physical Cores" if h.cpu_cores_physical else "Unknown Cores"
-            print(f"  - CPU      : {c_name} | {cores_str}")
+            result += f"  - CPU      : {c_name} | {cores_str}"
             # GPU Details
             if h.cuda_available:
                 g_count = h.gpu_count or 1
                 g_name = h.gpu_name or "Unknown GPU"
-                print(f"  - GPU      : {g_count}x {g_name}")
+                result += f"  - GPU      : {g_count}x {g_name}"
             else:
-                print("  - GPU      : None (CPU Only)")
+                result += "  - GPU      : None (CPU Only)"
 
             # Software
-            print(f"  - Python   : {h.python_version}")
+            result += f"  - Python   : {h.python_version}"
 
             frameworks = []
             if h.torch_version:
@@ -71,42 +72,43 @@ class FLOPpyReport:
                 frameworks.append(f"Scikit-learn {h.sklearn_version}")
 
             if frameworks:
-                print(f"  - Libs     : {' | '.join(frameworks)}")
+                result += f"  - Libs     : {' | '.join(frameworks)}"
 
         # Model and Device details
-        print("Modules tracked details:")
-        print(f"  - Device   : {self.model_device}")
-        print(f"  - Model    : {self.model_architecture}")
-        print(f"  - Loss     : {self.loss_type}")
-        print(f"  - Optimizer: {self.optimizer_type}")
+        result += "Modules tracked details:"
+        result += f"  - Device   : {self.model_device}"
+        result += f"  - Model    : {self.model_architecture}"
+        #result += f"  - Loss     : {self.loss_type}")
+        #result += f"  - Optimizer: {self.optimizer_type}")
 
         # Computational Workload Breakdown
-        print("Computational Workload Breakdown:")
-        print(f"  - Model (Forward)         : {format_flops(self.model_flop):>15}")
+        result += "Computational Workload Breakdown:"
+        result += f"  - Model (Forward)         : {format_flops(self.model_flop):>15}"
         if self.loss_forward_flop > 0:
-            print(f"  - Loss (Forward)          : {format_flops(self.loss_forward_flop):>15}")
+            result += f"  - Loss (Forward)          : {format_flops(self.loss_forward_flop):>15}"
 
         if self.loss_backward_flop > 0:
-            print(f"  - Loss (Backward)         : {format_flops(self.loss_backward_flop):>15}")
+            result += f"  - Loss (Backward)         : {format_flops(self.loss_backward_flop):>15}"
 
         if self.optimizer_flop > 0:
-            print(f"  - Optimizer (Update)      : {format_flops(self.optimizer_flop):>15}")
+            result += f"  - Optimizer (Update)      : {format_flops(self.optimizer_flop):>15}"
 
         if self.preproc_ops > 0:
-            print(f"  - Preprocessing/Tokenizer : {str(self.preproc_ops) + ' Ops':>15}")
+            result += f"  - Preprocessing/Tokenizer : {str(self.preproc_ops) + ' Ops':>15}"
 
-        print("-" * 70)
+        result += "-" * 70
         # Totals
-        print(f"OVERALL TOTAL FLOPs         : {format_flops(self.overall_flop):>15}")
-        print("=" * 70)
+        result += f"OVERALL TOTAL FLOPs         : {format_flops(self.overall_flop):>15}"
+        result += "=" * 70
         # Integrations
         if self.export_path or (self.use_wandb and self.wandb_project):
-            print("Tracking & Integrations:")
+            result += "Tracking & Integrations:"
             if self.export_path:
-                print(f"  - Export Path: {self.export_path}")
+                result += f"  - Export Path: {self.export_path}"
 
             if self.use_wandb and self.wandb_project:
-                print(f"  - W&B Project: {self.wandb_project}")
+                result += f"  - W&B Project: {self.wandb_project}"
 
-            print("=" * 70)
+            result += "=" * 70
 
+        return result
