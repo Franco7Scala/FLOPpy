@@ -250,6 +250,7 @@ class FLOPpyTracker:
 
         if self._tracker is not None:
             self._tracker.__exit__(None, None, None)
+            self._tracker = None
 
         self._build_report()
 
