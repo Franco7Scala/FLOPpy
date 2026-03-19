@@ -11,21 +11,22 @@ from .utils.tokenizer_ops import TokenizerWithOps
 class FLOPpyTracker:
     """
     Tracker for monitoring FLOPs in machine learning and deep learning models.
-    This class provides functionality to track floating-point operations (FLOPs)
-    for models, optimizers, loss functions, and tokenizers during training or inference.
-
     Supported usage patterns:
-    
+
     1) Immediate-start mode:
         tracker = FLOPpyTracker(...)
         tracker.run(model=model, optimizer=optimizer, loss_fn=loss_fn)
         ...
+        tracker.batch()
+        tracker.epoch()
         print(tracker.report())
-        
+
     2) Context-manager mode:
         with FLOPpyTracker(...) as tracker:
             tracker.start(model=model, optimizer=optimizer, loss_fn=loss_fn)
             ...
+            tracker.batch()
+            tracker.epoch()
             tracker.stop()
     """
 
@@ -53,6 +54,10 @@ class FLOPpyTracker:
         self._hardware: Optional[HardwareInfo] = None
         self._is_active: bool = False
         self._summary_printed: bool = False
+
+        # progress counters for callback-based logging
+        self._epoch_idx: int = 0
+        self._batch_idx: int = 0
 
     # ------------------------------------------------------------
     # Tokenizer access
@@ -151,6 +156,10 @@ class FLOPpyTracker:
         self._summary_printed = False
         self._wrapped_tokenizer = None
 
+        # Reset logging counters at every new run
+        self._epoch_idx = 0
+        self._batch_idx = 0
+
         if self.print_hardware:
             self._hardware = get_hardware_info()
         else:
@@ -167,15 +176,11 @@ class FLOPpyTracker:
         )
         self._tracker.__enter__()
 
-        # --------------------------------------------------------
         # Automatic tokenizer wrapping for HF / preprocessing
-        # --------------------------------------------------------
         if self._base_tokenizer is not None:
             self._wrapped_tokenizer = self._tracker.wrap_tokenizer(self._base_tokenizer)
 
-        # --------------------------------------------------------
-        # Torch-specific hooks 
-        # --------------------------------------------------------
+        # Torch-specific hooks
         if not isinstance(self._tracker.backend, SklearnBackend):
             self._tracker.attach_torch_hooks(
                 model=self._model,
@@ -186,6 +191,50 @@ class FLOPpyTracker:
 
         self._is_active = True
         return self
+
+    # ------------------------------------------------------------
+    # Intermediate logging callbacks
+    # ------------------------------------------------------------
+
+    def _build_progress_snapshot(self) -> dict:
+        """
+        Build the current intermediate logging snapshot.
+        """
+        if self._tracker is None:
+            raise RuntimeError("No active internal tracker available.")
+
+        snapshot = self._tracker.build_progress_dict()
+        snapshot["epoch_idx"] = self._epoch_idx
+        snapshot["batch_idx"] = self._batch_idx
+        return snapshot
+
+    def batch(self) -> None:
+        """
+        Log the current FLOP counters as a batch snapshot.
+        Each call increments the internal batch counter by 1.
+        """
+        if not self._is_active or self._tracker is None:
+            raise RuntimeError("batch() requires an active monitoring session.")
+
+        self._batch_idx += 1
+        snapshot = self._build_progress_snapshot()
+
+        if self._tracker.logger is not None and hasattr(self._tracker.logger, "log_batch"):
+            self._tracker.logger.log_batch(snapshot)
+
+    def epoch(self) -> None:
+        """
+        Log the current FLOP counters as an epoch snapshot.
+        Each call increments the internal epoch counter by 1.
+        """
+        if not self._is_active or self._tracker is None:
+            raise RuntimeError("epoch() requires an active monitoring session.")
+
+        self._epoch_idx += 1
+        snapshot = self._build_progress_snapshot()
+
+        if self._tracker.logger is not None and hasattr(self._tracker.logger, "log_epoch"):
+            self._tracker.logger.log_epoch(snapshot)
 
     # ------------------------------------------------------------
     # Stop + report
@@ -202,7 +251,6 @@ class FLOPpyTracker:
         if self._tracker is not None:
             self._tracker.__exit__(None, None, None)
 
-        # Build report before clearing active state
         self._build_report()
 
         if self.print_summary and self._report is not None and not self._summary_printed:
@@ -216,10 +264,6 @@ class FLOPpyTracker:
         """
         Returns the final report.
         If monitoring is still active, it is stopped automatically first.
-        This supports the usage pattern:
-            tracker.run(...)
-            ...
-            print(tracker.report())
         """
         if self._is_active:
             self.stop()
@@ -246,7 +290,6 @@ class FLOPpyTracker:
         preproc_ops = int(getattr(self._tracker, "total_preproc_ops", 0))
         overall_flop = int(getattr(self._tracker, "total_overall_flop", 0))
 
-        # Determine model architecture and device
         model_architecture = "unknown"
         model_device = "CPU"
 
@@ -342,7 +385,6 @@ class FLOPpyTracker:
         print(f" FLOPpyTracker Summary{run_label}")
         print("=" * 70)
 
-        # Hardware info
         if rep.hardware is not None:
             h = rep.hardware
             print("Hardware Environment:")
@@ -377,12 +419,10 @@ class FLOPpyTracker:
             if frameworks:
                 print(f"  - Libs     : {' | '.join(frameworks)}")
 
-        # Model and device details
         print("Model details:")
         print(f"  - Model    : {rep.model_architecture}")
         print(f"  - Device   : {rep.model_device}")
 
-        # Computational workload
         print("Computational Workload Breakdown:")
         print(f"  - Model (Forward)         : {format_flops(rep.model_flop):>15}")
 
