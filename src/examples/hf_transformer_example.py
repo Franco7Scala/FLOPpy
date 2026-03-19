@@ -40,8 +40,9 @@ with torch.no_grad():
 
 print(tracker.report())
 
+
 # ============================================================
-# MODE 2: context manager style
+# MODE 2: context-manager style
 # ============================================================
 
 model = AutoModelForSequenceClassification.from_pretrained(model_name)
