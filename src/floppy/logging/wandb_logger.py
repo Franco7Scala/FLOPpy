@@ -1,37 +1,80 @@
 from __future__ import annotations
 from .base_logger import BaseLogger
 
-import wandb
-
 
 class WandbLogger(BaseLogger):
-    """
-    Logger for Weights & Biases.
-    Only records the final FLOP summary.
-    """
-
-    def __init__(self, wandb_project_name: str, wandb_token: str, wandb_run_name: str):
-        self.wandb_project_name = wandb_project_name
+    def __init__(
+        self,
+        use_wandb: bool,
+        wandb_project: str | None = None,
+        wandb_token: str | None = None,
+        run_name: str | None = None,
+    ):
+        self.use_wandb = use_wandb
+        self.wandb_project = wandb_project
         self.wandb_token = wandb_token
-        self.wandb_run_name = wandb_run_name
-        wandb.login(key=self.wandb_token)
-        self._run = wandb.init(project=self.wandb_project_name, name=self.wandb_run_name, reinit=True)
+        self.run_name = run_name
+        self._summary_dict = None
+        self._wandb = None
+        self._run = None
+
+        if not self.use_wandb:
+            return
+
+        try:
+            import wandb
+            self._wandb = wandb
+
+            if self.wandb_token:
+                try:
+                    wandb.login(key=self.wandb_token)
+                except Exception:
+                    pass
+
+            self._run = wandb.init(
+                project=self.wandb_project or "floppy",
+                name=self.run_name,
+                reinit=True,
+            )
+        except Exception:
+            self._wandb = None
+            self._run = None
+
+    def log_batch(self, summary: dict):
+        if self._run is not None:
+            try:
+                payload = dict(summary)
+                payload["log_type"] = "batch"
+                self._wandb.log(payload)
+            except Exception:
+                pass
+        return summary
+
+    def log_epoch(self, summary: dict):
+        if self._run is not None:
+            try:
+                payload = dict(summary)
+                payload["log_type"] = "epoch"
+                self._wandb.log(payload)
+            except Exception:
+                pass
+        return summary
 
     def log_summary(self, summary: dict):
-        summary_dict = {
-            "total_model_flops": summary.get("total_model_flop", 0),
-            "total_optimizer_flops": summary.get("total_optimizer_flop", 0),
-            "total_loss_forward_flops": summary.get("total_loss_forward_flop", 0),
-            "total_loss_backward_flops": summary.get("total_loss_backward_flop", 0),
-            "total_overall_flops": summary.get("total_overall_flop", 0),
-        }
-        if self._run is not None:
-            wandb.log(summary_dict)
-            self._run.summary.update(summary_dict)
+        self._summary_dict = dict(summary)
 
-        return summary_dict
+        if self._run is not None:
+            try:
+                self._wandb.log(self._summary_dict)
+                self._run.summary.update(self._summary_dict)
+            except Exception:
+                pass
+
+        return self._summary_dict
 
     def close(self):
         if self._run is not None:
-            self._run.finish()
-            self._run = None
+            try:
+                self._run.finish()
+            except Exception:
+                pass
