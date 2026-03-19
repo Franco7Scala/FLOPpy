@@ -1,34 +1,49 @@
 from __future__ import annotations
-from .base_logger import BaseLogger
-
 import csv
+from .base_logger import BaseLogger
 
 
 class CsvLogger(BaseLogger):
-
     def __init__(self, export_path: str | None):
         self.export_path = export_path
         self._summary_dict = None
+        self._batch_logs = []
+        self._epoch_logs = []
+
+    def log_batch(self, summary: dict):
+        self._batch_logs.append(dict(summary))
+        return summary
+
+    def log_epoch(self, summary: dict):
+        self._epoch_logs.append(dict(summary))
+        return summary
 
     def log_summary(self, summary: dict):
-        self._summary_dict = {
-            "model FLOPs": summary.get("total_model_flop", 0),
-            "loss forward FLOPs": summary.get("total_loss_forward_flop", 0),
-            "loss backward FLOPs": summary.get("total_loss_backward_flop", 0),
-            "optimizer FLOPs": summary.get("total_optimizer_flop", 0),
-            "overall FLOPs": summary.get("total_overall_flop", 0),
-        }
+        self._summary_dict = dict(summary)
         return self._summary_dict
 
     def close(self):
-        if self.export_path is None or self._summary_dict is None:
+        if self.export_path is None:
             return
 
         with open(self.export_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["metric", "value"])
-            for key, value in self._summary_dict.items():
-                if key == "loss backward FLOP" and value == 0:
-                    continue
+            writer.writerow(["type", "index", "metric", "value"])
 
-                writer.writerow([key, value])
+            for entry in self._batch_logs:
+                idx = entry.get("batch_idx", "")
+                for key, value in entry.items():
+                    if key == "batch_idx":
+                        continue
+                    writer.writerow(["batch", idx, key, value])
+
+            for entry in self._epoch_logs:
+                idx = entry.get("epoch_idx", "")
+                for key, value in entry.items():
+                    if key == "epoch_idx":
+                        continue
+                    writer.writerow(["epoch", idx, key, value])
+
+            if self._summary_dict is not None:
+                for key, value in self._summary_dict.items():
+                    writer.writerow(["summary", "", key, value])
