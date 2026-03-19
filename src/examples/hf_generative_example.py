@@ -11,11 +11,16 @@ prompt = "The future of artificial intelligence"
 
 base_tokenizer = AutoTokenizer.from_pretrained(model_name)
 
+# GPT-2 often needs an explicit pad token for safer generation
+if base_tokenizer.pad_token is None:
+    base_tokenizer.pad_token = base_tokenizer.eos_token
+
 # ============================================================
 # MODE 1
 # ============================================================
 
 model = AutoModelForCausalLM.from_pretrained(model_name)
+model.config.pad_token_id = base_tokenizer.pad_token_id
 
 tracker = FLOPpyTracker(
     run_name="hf_generate_test",
@@ -31,15 +36,20 @@ inputs = tracker.tokenizer(
 )
 
 with torch.no_grad():
-    generated = model.generate(**inputs, max_new_tokens=20)
+    generated = model.generate(
+        **inputs,
+        max_new_tokens=20,
+        pad_token_id=base_tokenizer.pad_token_id,
+    )
 
 print(tracker.report())
 
 # ============================================================
-# MODE 2: context manager style
+# MODE 2: context-manager style
 # ============================================================
 
 model = AutoModelForCausalLM.from_pretrained(model_name)
+model.config.pad_token_id = base_tokenizer.pad_token_id
 
 with FLOPpyTracker(
     run_name="hf_generate_test_with",
@@ -55,7 +65,11 @@ with FLOPpyTracker(
     )
 
     with torch.no_grad():
-        generated = model.generate(**inputs, max_new_tokens=20)
+        generated = model.generate(
+            **inputs,
+            max_new_tokens=20,
+            pad_token_id=base_tokenizer.pad_token_id,
+        )
 
     tracker.stop()
 
