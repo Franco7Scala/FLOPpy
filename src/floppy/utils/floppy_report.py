@@ -9,6 +9,8 @@ class FLOPpyReport:
     run_name: Optional[str]
     model_architecture: Optional[str]
     model_device: Optional[str]
+    loss_type: Optional[str]
+    optimizer_type: Optional[str]
     backend: str
     model_flop: int
     optimizer_flop: int
@@ -20,3 +22,91 @@ class FLOPpyReport:
     use_wandb: bool
     wandb_project: Optional[str]
     hardware: HardwareInfo
+    
+    def __str__(self):
+        def format_flops(flops: int) -> str:
+            if flops == 0:
+                return "0 FLOPs"
+
+            units = ["FLOPs", "KFLOPs", "MFLOPs", "GFLOPs", "TFLOPs", "PFLOPs"]
+            unit_idx = 0
+            float_flops = float(flops)
+            while float_flops >= 1000.0 and unit_idx < len(units) - 1:
+                float_flops /= 1000.0
+                unit_idx += 1
+
+            return f"{float_flops:.2f} {units[unit_idx]}"
+
+        run_label = f"'{self.run_name}'" if self.run_name else ""
+        print("=" * 70)
+        print(f" FLOPpyTracker Summary{run_label}")
+        print("=" * 70)
+        # Hardware Info
+        if self.hardware is not None:
+            h = self.hardware
+            print("Hardware Environment:")
+            # System & RAM
+            ram_str = f"{h.ram_total_gb:.0f} GB RAM" if h.ram_total_gb else "Unknown RAM"
+            print(f"  - System   : {h.os} ({h.machine}) | {ram_str}")
+            # CPU Details
+            c_name = getattr(h, "cpu_name", None) or h.processor or "Unknown CPU"
+            cores_str = f"{h.cpu_cores_physical} Physical Cores" if h.cpu_cores_physical else "Unknown Cores"
+            print(f"  - CPU      : {c_name} | {cores_str}")
+            # GPU Details
+            if h.cuda_available:
+                g_count = h.gpu_count or 1
+                g_name = h.gpu_name or "Unknown GPU"
+                print(f"  - GPU      : {g_count}x {g_name}")
+            else:
+                print("  - GPU      : None (CPU Only)")
+
+            # Software
+            print(f"  - Python   : {h.python_version}")
+
+            frameworks = []
+            if h.torch_version:
+                frameworks.append(f"PyTorch {h.torch_version}")
+
+            if h.sklearn_version:
+                frameworks.append(f"Scikit-learn {h.sklearn_version}")
+
+            if frameworks:
+                print(f"  - Libs     : {' | '.join(frameworks)}")
+
+        # Model and Device details
+        print("Modules tracked details:")
+        print(f"  - Device   : {self.model_device}")
+        print(f"  - Model    : {self.model_architecture}")
+        print(f"  - Loss     : {self.loss_type}")
+        print(f"  - Optimizer: {self.optimizer_type}")
+
+        # Computational Workload Breakdown
+        print("Computational Workload Breakdown:")
+        print(f"  - Model (Forward)         : {format_flops(self.model_flop):>15}")
+        if self.loss_forward_flop > 0:
+            print(f"  - Loss (Forward)          : {format_flops(self.loss_forward_flop):>15}")
+
+        if self.loss_backward_flop > 0:
+            print(f"  - Loss (Backward)         : {format_flops(self.loss_backward_flop):>15}")
+
+        if self.optimizer_flop > 0:
+            print(f"  - Optimizer (Update)      : {format_flops(self.optimizer_flop):>15}")
+
+        if self.preproc_ops > 0:
+            print(f"  - Preprocessing/Tokenizer : {str(self.preproc_ops) + ' Ops':>15}")
+
+        print("-" * 70)
+        # Totals
+        print(f"OVERALL TOTAL FLOPs         : {format_flops(self.overall_flop):>15}")
+        print("=" * 70)
+        # Integrations
+        if self.export_path or (self.use_wandb and self.wandb_project):
+            print("Tracking & Integrations:")
+            if self.export_path:
+                print(f"  - Export Path: {self.export_path}")
+
+            if self.use_wandb and self.wandb_project:
+                print(f"  - W&B Project: {self.wandb_project}")
+
+            print("=" * 70)
+

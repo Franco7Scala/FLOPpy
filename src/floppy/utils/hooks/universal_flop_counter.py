@@ -25,35 +25,26 @@ class UniversalFlopCounter(TorchDispatchMode):
         out_elements = self._get_numel(out)
         in_elements = self._get_numel(args[0]) if len(args) > 0 else 0
 
-        # 1. OPTIMIZER: foreach / fused
+        # 1. OPTIMIZER: foreach
         if "foreach" in func_str:
-            if "addcdiv" in func_str or "addcmul" in func_str:
+            if "addcdiv" in func_str or "addcmul" in func_str or "lerp" in func_str:
                 self.flops += in_elements * 3
 
             else:
                 self.flops += in_elements
 
-        elif "aten.addcdiv" in func_str or "aten.addcmul" in func_str:
+        # 2. COMPOSITE OPERATIONS
+        elif "aten.addcdiv" in func_str or "aten.addcmul" in func_str or "aten.lerp" in func_str:
             self.flops += in_elements * 3
 
-        # 2. ELEMENT-WISE OPERATIONS
-        elif any(
-            func_str.startswith(f"aten.{op}")
-            for op in [
-                "add", "sub", "mul", "div",
-                "exp", "log", "pow", "neg", "abs",
-                "relu", "sigmoid", "tanh",
-                "sqrt", "rsqrt"
-            ]
-        ):
+        # 3. ELEMENT-WISE OPERATIONS
+        elif any(func_str.startswith(f"aten.{op}") for op in [
+                    "add", "sub", "mul", "div",
+                    "exp", "log", "pow", "neg", "abs",
+                    "relu", "sigmoid", "tanh",
+                    "sqrt", "rsqrt"]):
             elements = out_elements if out_elements > 0 else in_elements
             self.flops += elements
-
-        # 3. REDUCTIONS
-        elif any(op in func_str for op in ["aten.sum", "aten.mean", "aten.max", "aten.min", "aten.norm", "aten.var"]):
-            self.flops += in_elements
-            if "aten.mean" in func_str or "aten.var" in func_str:
-                self.flops += out_elements
 
         # 4. BASIC LINEAR ALGEBRA
         elif "aten.mm" in func_str or "aten.addmm" in func_str:

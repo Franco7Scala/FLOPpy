@@ -1,6 +1,7 @@
 from __future__ import annotations
 from .base import BaseBackend
 
+import threading
 import torch
 import torch.nn as nn
 
@@ -29,6 +30,7 @@ class TorchBackend(BaseBackend):
     """
 
     def __init__(self, model: nn.Module, logger=None):
+        self._root_model = model
         if isinstance(model, (nn.DataParallel, torch.nn.parallel.DistributedDataParallel)):
             model = model.module
 
@@ -36,6 +38,7 @@ class TorchBackend(BaseBackend):
         self._layer_handles: list[torch.utils.hooks.RemovableHandle] = []
         self._root_handles: list[torch.utils.hooks.RemovableHandle] = []
         self._current_forward_flop: int = 0
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------
     # Lifecycle
@@ -125,8 +128,8 @@ class TorchBackend(BaseBackend):
                     self._layer_handles.append(handle)
 
         # root hooks to delimit one model forward
-        pre_handle = self.model.register_forward_pre_hook(self._on_forward_start)
-        post_handle = self.model.register_forward_hook(self._on_forward_end)
+        pre_handle = self._root_model.register_forward_pre_hook(self._on_forward_start)
+        post_handle = self._root_model.register_forward_hook(self._on_forward_end)
         self._root_handles.extend([pre_handle, post_handle])
 
     def stop(self):
@@ -274,7 +277,8 @@ class TorchBackend(BaseBackend):
             # Their computational cost is already accounted for by hooks attached to their internal layers.
             flop = 0
 
-        self._current_forward_flop += int(flop)
+        with self._lock:
+            self._current_forward_flop += int(flop)
 
     # ------------------------------------------------------------
     # FLOP formulas

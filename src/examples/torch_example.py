@@ -23,7 +23,11 @@ input_data = input_data.to("cuda" if torch.cuda.is_available() else "cpu")
 labels = labels.to("cuda" if torch.cuda.is_available() else "cpu")
 
 loss_fn = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters())
+#optimizer = torch.optim.Adam(model.parameters())
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+#optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
+#optimizer = torch.optim.RMSprop(model.parameters(), lr=0.01)
+#optimizer = torch.optim.Adagrad(model.parameters(), lr=0.01)
 
 tracker = FLOPpyTracker(
     run_name="pytorch_experiment",
@@ -38,7 +42,10 @@ loss = loss_fn(y_hat, labels)
 loss.backward()
 optimizer.step()
 
+tracker.stop()
 print(tracker.report())
+
+
 
 # ============================================================
 # MODE 2: context manager style
@@ -51,15 +58,15 @@ with FLOPpyTracker(
     run_name="pytorch_experiment_with",
     print_summary=True,
     print_hardware=True,
-) as tracker:
+) as tracker2:
 
-    tracker.start(model=model, optimizer=optimizer, loss_fn=loss_fn)
+    tracker2.start(model=model, optimizer=optimizer, loss_fn=loss_fn)
 
     y_hat = model(input_data)
     loss = loss_fn(y_hat, labels)
     loss.backward()
     optimizer.step()
 
-    tracker.stop()
+    tracker2.stop()
 
-print(tracker.report())
+    print(tracker2.report())
