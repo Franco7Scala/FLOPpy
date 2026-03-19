@@ -7,6 +7,7 @@ import sys
 import psutil
 import torch
 import sklearn
+import subprocess
 
 
 @dataclass
@@ -16,6 +17,7 @@ class HardwareInfo:
     machine: str
     processor: str
     python_version: str
+    cpu_name: Optional[str]
     cpu_cores_logical: Optional[int]
     cpu_cores_physical: Optional[int]
     ram_total_gb: Optional[float]
@@ -30,12 +32,38 @@ def _bytes_to_gb(x: int) -> float:
     return round(x / (1024 ** 3), 2)
 
 
+def _get_cpu_name() -> Optional[str]:
+    system = platform.system()
+    try:
+        if system == "Linux":
+            with open("/proc/cpuinfo", "r") as f:
+                for line in f:
+                    if "model name" in line:
+                        return line.split(":", 1)[1].strip()
+
+        elif system == "Darwin":
+            return subprocess.check_output(["sysctl", "-n", "machdep.cpu.brand_string"]).decode("utf-8").strip()
+
+        elif system == "Windows":
+            output = subprocess.check_output(["wmic", "cpu", "get", "name"]).decode("utf-8").strip()
+
+            lines = [line.strip() for line in output.split("\n") if line.strip()]
+            if len(lines) > 1:
+                return lines[1]
+
+    except Exception:
+        pass
+
+    # Fallback if the OS-specific commands fail
+    return platform.processor() or "Unknown CPU"
+
 def get_hardware_info() -> HardwareInfo:
     os_name = platform.system()
     os_ver = platform.version()
     machine = platform.machine()
     processor = platform.processor()
     pyver = sys.version.split()[0]
+    cpu_name = _get_cpu_name()
     cpu_logical = psutil.cpu_count(logical=True)
     cpu_physical = psutil.cpu_count(logical=False)
     ram_gb = _bytes_to_gb(psutil.virtual_memory().total)
@@ -57,6 +85,7 @@ def get_hardware_info() -> HardwareInfo:
         machine=machine,
         processor=processor,
         python_version=pyver,
+        cpu_name=cpu_name,
         cpu_cores_logical=cpu_logical,
         cpu_cores_physical=cpu_physical,
         ram_total_gb=ram_gb,

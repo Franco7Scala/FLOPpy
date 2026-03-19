@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from torch.optim import Optimizer
 from .core import Tracker
 from .backends.sklearn_backend import SklearnBackend
@@ -115,10 +115,13 @@ class FLOPpyTracker:
 
         if model is not None:
             self._model = model
+
         if optimizer is not None:
             self._optimizer = optimizer
+
         if loss_fn is not None:
             self._loss_fn = loss_fn
+
         if tokenizer is not None:
             self._base_tokenizer = tokenizer
 
@@ -138,6 +141,7 @@ class FLOPpyTracker:
 
         if self.print_hardware:
             self._hardware = get_hardware_info()
+
         else:
             self._hardware = None
 
@@ -199,9 +203,23 @@ class FLOPpyTracker:
         preproc_ops = int(getattr(self._tracker, "total_preproc_ops", 0))
         overall_flop = int(getattr(self._tracker, "total_overall_flop", 0))
 
+        # determining the architecture and device for the model
+        model_cls = self._model.__class__
+        model_architecture = f"{model_cls.__module__}.{model_cls.__name__}"
+        model_device = "CPU"
+        if hasattr(self._model, "parameters"):
+            try:
+                param_device = next(self._model.parameters()).device
+                model_device = str(param_device).upper()
+
+            except Exception:
+                model_device = "Unknown"
+
         self._report = FLOPpyReport(
             run_name=self.run_name,
             backend=self._tracker.backend.__class__.__name__.replace("Backend", "").lower(),
+            model_architecture=model_architecture,
+            model_device=model_device,
             model_flop=model_flop,
             optimizer_flop=optimizer_flop,
             loss_forward_flop=loss_forward_flop,
@@ -267,25 +285,32 @@ class FLOPpyTracker:
 
             return f"{float_flops:.2f} {units[unit_idx]}"
 
-        run_label = f"'{rep.run_name}'" if rep.run_name else ''
-        print("=" * 65)
+        run_label = f"'{rep.run_name}'" if rep.run_name else ""
+        print("=" * 70)
         print(f" FLOPpyTracker Summary{run_label}")
-        print("=" * 65)
+        print("=" * 70)
         # Hardware Info
         if rep.hardware is not None:
             h = rep.hardware
             print("Hardware Environment:")
-            cores_str = f"{h.cpu_cores_physical} Physical Cores" if h.cpu_cores_physical else "Unknown Cores"
+            # System & RAM
             ram_str = f"{h.ram_total_gb:.0f} GB RAM" if h.ram_total_gb else "Unknown RAM"
-            print(f"  - System   : {h.os} ({h.machine}) | {cores_str} | {ram_str}")
+            print(f"  - System   : {h.os} ({h.machine}) | {ram_str}")
+            # CPU Details
+            c_name = getattr(h, "cpu_name", None) or h.processor or "Unknown CPU"
+            cores_str = f"{h.cpu_cores_physical} Physical Cores" if h.cpu_cores_physical else "Unknown Cores"
+            print(f"  - CPU      : {c_name} | {cores_str}")
+            # GPU Details
             if h.cuda_available:
                 g_count = h.gpu_count or 1
                 g_name = h.gpu_name or "Unknown GPU"
-                print(f"  - Device   : {g_count}x {g_name}")
+                print(f"  - GPU      : {g_count}x {g_name}")
             else:
-                print("  - Device   : CPU Only")
+                print("  - GPU      : None (CPU Only)")
 
+            # Software
             print(f"  - Python   : {h.python_version}")
+
             frameworks = []
             if h.torch_version:
                 frameworks.append(f"PyTorch {h.torch_version}")
@@ -294,7 +319,12 @@ class FLOPpyTracker:
                 frameworks.append(f"Scikit-learn {h.sklearn_version}")
 
             if frameworks:
-                print(f"  - Libs  : {' | '.join(frameworks)}")
+                print(f"  - Libs     : {' | '.join(frameworks)}")
+
+        # Model and Device details
+        print("Model details:")
+        print(f"  - Model    : {rep.model_architecture}")
+        print(f"  - Device   : {rep.model_device}")
 
         # Computational Workload Breakdown
         print("Computational Workload Breakdown:")
@@ -311,10 +341,10 @@ class FLOPpyTracker:
         if rep.preproc_ops > 0:
             print(f"  - Preprocessing/Tokenizer : {str(rep.preproc_ops) + ' Ops':>15}")
 
-        print("-" * 65)
+        print("-" * 70)
         # Totals
         print(f"OVERALL TOTAL FLOPs         : {format_flops(rep.overall_flop):>15}")
-        print("=" * 65)
+        print("=" * 70)
         # Integrations
         if rep.export_path or (rep.use_wandb and rep.wandb_project):
             print("Tracking & Integrations:")
@@ -324,4 +354,4 @@ class FLOPpyTracker:
             if rep.use_wandb and rep.wandb_project:
                 print(f"  - W&B Project: {rep.wandb_project}")
 
-            print("=" * 65)
+            print("=" * 70)

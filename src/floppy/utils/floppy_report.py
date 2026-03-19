@@ -7,6 +7,8 @@ from floppy.utils.hardware_info import HardwareInfo
 @dataclass
 class FLOPpyReport:
     run_name: Optional[str]
+    model_architecture: Optional[str]
+    model_device: Optional[str]
     backend: str
     model_flop: int
     optimizer_flop: int

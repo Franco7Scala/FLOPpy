@@ -18,6 +18,10 @@ model = nn.Sequential(
     nn.ReLU(),
 )
 
+model.to("cuda" if torch.cuda.is_available() else "cpu")
+input_data = input_data.to("cuda" if torch.cuda.is_available() else "cpu")
+labels = labels.to("cuda" if torch.cuda.is_available() else "cpu")
+
 loss_fn = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters())
 
@@ -39,11 +43,6 @@ print(tracker.report())
 # ============================================================
 # MODE 2: context manager style
 # ============================================================
-
-model = nn.Sequential(
-    nn.Linear(10, 10),
-    nn.ReLU(),
-)
 
 loss_fn = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters())
