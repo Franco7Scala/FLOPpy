@@ -10,25 +10,31 @@ from .utils.tokenizer_ops import TokenizerWithOps
 
 class FLOPpyTracker:
     """
-    Tracker for monitoring FLOPs in machine and deep learning models.
-
+    Tracker for monitoring FLOPs in machine learning and deep learning models.
     This class provides functionality to track floating-point operations (FLOPs)
-    for models, optimizers, loss functions and tokenizers during training or inference.
-    It supports integration with Weights & Biases for logging and can export reports.
+    for models, optimizers, loss functions, and tokenizers during training or inference.
 
-    Attributes:
-        run_name (Optional[str]): Name of the run for identification.
-        print_summary (bool): Whether to print a summary after stopping.
-        print_hardware (bool): Whether to print hardware information.
-
-    Methods:
-        run(...): Configure and immediately start monitoring.
-        start(...): Start monitoring.
-        stop(): Stop monitoring and generate the report.
-        report(): Get the final report.
+    Supported usage patterns:
+    
+    1) Immediate-start mode:
+        tracker = FLOPpyTracker(...)
+        tracker.run(model=model, optimizer=optimizer, loss_fn=loss_fn)
+        ...
+        print(tracker.report())
+        
+    2) Context-manager mode:
+        with FLOPpyTracker(...) as tracker:
+            tracker.start(model=model, optimizer=optimizer, loss_fn=loss_fn)
+            ...
+            tracker.stop()
     """
-class FLOPpyTracker:
-    def __init__(self, run_name: Optional[str] = None, print_summary: bool = True, print_hardware: bool = False):
+
+    def __init__(
+        self,
+        run_name: Optional[str] = None,
+        print_summary: bool = True,
+        print_hardware: bool = False,
+    ):
         self.run_name = run_name
         self.print_summary = print_summary
         self.print_hardware = print_hardware
@@ -44,8 +50,13 @@ class FLOPpyTracker:
         self._wandb_project: Optional[str] = None
         self._wandb_token: Optional[str] = None
         self._hooks_debug_print: bool = False
-        self._hardware: HardwareInfo = None
+        self._hardware: Optional[HardwareInfo] = None
         self._is_active: bool = False
+        self._summary_printed: bool = False
+
+    # ------------------------------------------------------------
+    # Tokenizer access
+    # ------------------------------------------------------------
 
     @property
     def tokenizer(self) -> TokenizerWithOps:
@@ -54,8 +65,9 @@ class FLOPpyTracker:
         Available only after start/run if a tokenizer was provided.
         """
         if self._wrapped_tokenizer is None:
-            raise RuntimeError("No tokenizer available. Pass tokenizer=... to run(...).")
-
+            raise RuntimeError(
+                "No wrapped tokenizer available. Pass tokenizer=... to start(...) or run(...)."
+            )
         return self._wrapped_tokenizer
 
     # ------------------------------------------------------------
@@ -103,10 +115,9 @@ class FLOPpyTracker:
     ) -> FLOPpyTracker:
         """
         Start monitoring.
-
         It can be used directly inside a context manager:
             with FLOPpyTracker(...) as tracker:
-                tracker.start(model=..., optimizer=..., loss_fn=...)
+                tracker.start(model=..., optimizer=..., loss_fn=..., tokenizer=...)
                 ...
                 tracker.stop()
         """
@@ -137,11 +148,11 @@ class FLOPpyTracker:
             raise RuntimeError("A model must be provided before starting monitoring.")
 
         self._report = None
+        self._summary_printed = False
         self._wrapped_tokenizer = None
 
         if self.print_hardware:
             self._hardware = get_hardware_info()
-
         else:
             self._hardware = None
 
@@ -156,9 +167,15 @@ class FLOPpyTracker:
         )
         self._tracker.__enter__()
 
+        # --------------------------------------------------------
+        # Automatic tokenizer wrapping for HF / preprocessing
+        # --------------------------------------------------------
         if self._base_tokenizer is not None:
             self._wrapped_tokenizer = self._tracker.wrap_tokenizer(self._base_tokenizer)
 
+        # --------------------------------------------------------
+        # Torch-specific hooks 
+        # --------------------------------------------------------
         if not isinstance(self._tracker.backend, SklearnBackend):
             self._tracker.attach_torch_hooks(
                 model=self._model,
@@ -185,17 +202,43 @@ class FLOPpyTracker:
         if self._tracker is not None:
             self._tracker.__exit__(None, None, None)
 
-        if self.print_summary:
-            self.report()
+        # Build report before clearing active state
+        self._build_report()
+
+        if self.print_summary and self._report is not None and not self._summary_printed:
             self._print_summary()
+            self._summary_printed = True
 
         self._is_active = False
         return self
 
     def report(self) -> FLOPpyReport:
         """
-        Returns a report.
+        Returns the final report.
+        If monitoring is still active, it is stopped automatically first.
+        This supports the usage pattern:
+            tracker.run(...)
+            ...
+            print(tracker.report())
         """
+        if self._is_active:
+            self.stop()
+
+        if self._report is None:
+            self._build_report()
+
+        if self._report is None:
+            raise RuntimeError("No report available. Start monitoring before requesting a report.")
+
+        return self._report
+
+    def _build_report(self) -> None:
+        """
+        Internal helper to build the final FLOPpyReport.
+        """
+        if self._tracker is None:
+            return
+
         model_flop = int(getattr(self._tracker, "total_model_flop", 0))
         optimizer_flop = int(getattr(self._tracker, "total_optimizer_flop", 0))
         loss_forward_flop = int(getattr(self._tracker, "total_loss_forward_flop", 0))
@@ -203,17 +246,20 @@ class FLOPpyTracker:
         preproc_ops = int(getattr(self._tracker, "total_preproc_ops", 0))
         overall_flop = int(getattr(self._tracker, "total_overall_flop", 0))
 
-        # determining the architecture and device for the model
-        model_cls = self._model.__class__
-        model_architecture = f"{model_cls.__module__}.{model_cls.__name__}"
+        # Determine model architecture and device
+        model_architecture = "unknown"
         model_device = "CPU"
-        if hasattr(self._model, "parameters"):
-            try:
-                param_device = next(self._model.parameters()).device
-                model_device = str(param_device).upper()
 
-            except Exception:
-                model_device = "Unknown"
+        if self._model is not None:
+            model_cls = self._model.__class__
+            model_architecture = f"{model_cls.__module__}.{model_cls.__name__}"
+
+            if hasattr(self._model, "parameters"):
+                try:
+                    param_device = next(self._model.parameters()).device
+                    model_device = str(param_device).upper()
+                except Exception:
+                    model_device = "Unknown"
 
         self._report = FLOPpyReport(
             run_name=self.run_name,
@@ -231,8 +277,6 @@ class FLOPpyTracker:
             wandb_project=self._wandb_project,
             hardware=self._hardware,
         )
-
-        return self._report
 
     # ------------------------------------------------------------
     # Context manager support
@@ -253,15 +297,21 @@ class FLOPpyTracker:
     # Manual tokenizer wrapping (optional helper)
     # ------------------------------------------------------------
 
-    def _wrap_tokenizer(self, base_tokenizer, cost_model: str = "chars+tokens") -> TokenizerWithOps:
+    def wrap_tokenizer(self, base_tokenizer, cost_model: str = "chars+tokens") -> TokenizerWithOps:
         """
         Optional helper for manual tokenizer wrapping.
         Requires an active internal Tracker.
         """
         if self._tracker is None:
-            raise RuntimeError("wrap_tokenizer(...) requires an active Tracker. Use start(...) or run(...) first.")
+            raise RuntimeError(
+                "wrap_tokenizer(...) requires an active Tracker. "
+                "Use start(...) or run(...) first."
+            )
 
-        return self._tracker.wrap_tokenizer(base_tokenizer=base_tokenizer, cost_model=cost_model)
+        return self._tracker.wrap_tokenizer(
+            base_tokenizer=base_tokenizer,
+            cost_model=cost_model,
+        )
 
     # ------------------------------------------------------------
     # Printing
@@ -279,28 +329,35 @@ class FLOPpyTracker:
             units = ["FLOPs", "KFLOPs", "MFLOPs", "GFLOPs", "TFLOPs", "PFLOPs"]
             unit_idx = 0
             float_flops = float(flops)
+
             while float_flops >= 1000.0 and unit_idx < len(units) - 1:
                 float_flops /= 1000.0
                 unit_idx += 1
 
             return f"{float_flops:.2f} {units[unit_idx]}"
 
-        run_label = f"'{rep.run_name}'" if rep.run_name else ""
+        run_label = f" '{rep.run_name}'" if rep.run_name else ""
+
         print("=" * 70)
         print(f" FLOPpyTracker Summary{run_label}")
         print("=" * 70)
-        # Hardware Info
+
+        # Hardware info
         if rep.hardware is not None:
             h = rep.hardware
             print("Hardware Environment:")
-            # System & RAM
+
             ram_str = f"{h.ram_total_gb:.0f} GB RAM" if h.ram_total_gb else "Unknown RAM"
             print(f"  - System   : {h.os} ({h.machine}) | {ram_str}")
-            # CPU Details
+
             c_name = getattr(h, "cpu_name", None) or h.processor or "Unknown CPU"
-            cores_str = f"{h.cpu_cores_physical} Physical Cores" if h.cpu_cores_physical else "Unknown Cores"
+            cores_str = (
+                f"{h.cpu_cores_physical} Physical Cores"
+                if h.cpu_cores_physical
+                else "Unknown Cores"
+            )
             print(f"  - CPU      : {c_name} | {cores_str}")
-            # GPU Details
+
             if h.cuda_available:
                 g_count = h.gpu_count or 1
                 g_name = h.gpu_name or "Unknown GPU"
@@ -308,27 +365,27 @@ class FLOPpyTracker:
             else:
                 print("  - GPU      : None (CPU Only)")
 
-            # Software
             print(f"  - Python   : {h.python_version}")
 
             frameworks = []
-            if h.torch_version:
+            if getattr(h, "torch_version", None):
                 frameworks.append(f"PyTorch {h.torch_version}")
 
-            if h.sklearn_version:
+            if getattr(h, "sklearn_version", None):
                 frameworks.append(f"Scikit-learn {h.sklearn_version}")
 
             if frameworks:
                 print(f"  - Libs     : {' | '.join(frameworks)}")
 
-        # Model and Device details
+        # Model and device details
         print("Model details:")
         print(f"  - Model    : {rep.model_architecture}")
         print(f"  - Device   : {rep.model_device}")
 
-        # Computational Workload Breakdown
+        # Computational workload
         print("Computational Workload Breakdown:")
         print(f"  - Model (Forward)         : {format_flops(rep.model_flop):>15}")
+
         if rep.loss_forward_flop > 0:
             print(f"  - Loss (Forward)          : {format_flops(rep.loss_forward_flop):>15}")
 
@@ -342,12 +399,12 @@ class FLOPpyTracker:
             print(f"  - Preprocessing/Tokenizer : {str(rep.preproc_ops) + ' Ops':>15}")
 
         print("-" * 70)
-        # Totals
         print(f"OVERALL TOTAL FLOPs         : {format_flops(rep.overall_flop):>15}")
         print("=" * 70)
-        # Integrations
+
         if rep.export_path or (rep.use_wandb and rep.wandb_project):
             print("Tracking & Integrations:")
+
             if rep.export_path:
                 print(f"  - Export Path: {rep.export_path}")
 
