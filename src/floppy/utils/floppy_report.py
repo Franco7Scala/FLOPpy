@@ -1,6 +1,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Optional
+from floppy.utils.hardware_info import HardwareInfo
 
 
 @dataclass
@@ -16,4 +17,4 @@ class FLOPpyReport:
     export_path: Optional[str]
     use_wandb: bool
     wandb_project: Optional[str]
-    hardware: Optional[Dict[str, Any]]
+    hardware: HardwareInfo

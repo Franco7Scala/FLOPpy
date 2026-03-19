@@ -4,7 +4,7 @@ from torch.optim import Optimizer
 from .core import Tracker
 from .backends.sklearn_backend import SklearnBackend
 from .utils.floppy_report import FLOPpyReport
-from .utils.hardware_info import get_hardware_info
+from .utils.hardware_info import get_hardware_info, HardwareInfo
 from .utils.tokenizer_ops import TokenizerWithOps
 
 
@@ -44,7 +44,7 @@ class FLOPpyTracker:
         self._wandb_project: Optional[str] = None
         self._wandb_token: Optional[str] = None
         self._hooks_debug_print: bool = False
-        self._hardware: Optional[Dict[str, Any]] = None
+        self._hardware: HardwareInfo = None
         self._is_active: bool = False
 
     @property
@@ -254,29 +254,74 @@ class FLOPpyTracker:
         if rep is None:
             return
 
-        run_label = f"[{rep.run_name}]" if rep.run_name else ""
+        def format_flops(flops: int) -> str:
+            if flops == 0:
+                return "0 FLOPs"
 
+            units = ["FLOPs", "KFLOPs", "MFLOPs", "GFLOPs", "TFLOPs", "PFLOPs"]
+            unit_idx = 0
+            float_flops = float(flops)
+            while float_flops >= 1000.0 and unit_idx < len(units) - 1:
+                float_flops /= 1000.0
+                unit_idx += 1
+
+            return f"{float_flops:.2f} {units[unit_idx]}"
+
+        run_label = f"'{rep.run_name}'" if rep.run_name else ''
+        print("=" * 65)
+        print(f" FLOPpyTracker Summary{run_label}")
+        print("=" * 65)
+        # Hardware Info
         if rep.hardware is not None:
-            print(f"[FLOPpyTracker{run_label}] Hardware: {rep.hardware}")
+            h = rep.hardware
+            print("Hardware Environment:")
+            cores_str = f"{h.cpu_cores_physical} Physical Cores" if h.cpu_cores_physical else "Unknown Cores"
+            ram_str = f"{h.ram_total_gb:.0f} GB RAM" if h.ram_total_gb else "Unknown RAM"
+            print(f"  - System   : {h.os} ({h.machine}) | {cores_str} | {ram_str}")
+            if h.cuda_available:
+                g_count = h.gpu_count or 1
+                g_name = h.gpu_name or "Unknown GPU"
+                print(f"  - Device   : {g_count}x {g_name}")
+            else:
+                print("  - Device   : CPU Only")
 
-        print(f"[FLOPpyTracker{run_label}] model FLOPs: {rep.model_flop}")
+            print(f"  - Python   : {h.python_version}")
+            frameworks = []
+            if h.torch_version:
+                frameworks.append(f"PyTorch {h.torch_version}")
 
+            if h.sklearn_version:
+                frameworks.append(f"Scikit-learn {h.sklearn_version}")
+
+            if frameworks:
+                print(f"  - Libs  : {' | '.join(frameworks)}")
+
+        # Computational Workload Breakdown
+        print("Computational Workload Breakdown:")
+        print(f"  - Model (Forward)         : {format_flops(rep.model_flop):>15}")
         if rep.loss_forward_flop > 0:
-            print(f"[FLOPpyTracker{run_label}] loss forward FLOPs: {rep.loss_forward_flop}")
+            print(f"  - Loss (Forward)          : {format_flops(rep.loss_forward_flop):>15}")
 
         if rep.loss_backward_flop > 0:
-            print(f"[FLOPpyTracker{run_label}] loss backward FLOPs: {rep.loss_backward_flop}")
+            print(f"  - Loss (Backward)         : {format_flops(rep.loss_backward_flop):>15}")
 
         if rep.optimizer_flop > 0:
-            print(f"[FLOPpyTracker{run_label}] optimizer FLOPs: {rep.optimizer_flop}")
+            print(f"  - Optimizer (Update)      : {format_flops(rep.optimizer_flop):>15}")
 
         if rep.preproc_ops > 0:
-            print(f"[FLOPpyTracker{run_label}] preprocessing/tokenizer Ops: {rep.preproc_ops}")
+            print(f"  - Preprocessing/Tokenizer : {str(rep.preproc_ops) + ' Ops':>15}")
 
-        print(f"[FLOPpyTracker{run_label}] overall FLOPs: {rep.overall_flop}")
+        print("-" * 65)
+        # Totals
+        print(f"OVERALL TOTAL FLOPs         : {format_flops(rep.overall_flop):>15}")
+        print("=" * 65)
+        # Integrations
+        if rep.export_path or (rep.use_wandb and rep.wandb_project):
+            print("Tracking & Integrations:")
+            if rep.export_path:
+                print(f"  - Export Path: {rep.export_path}")
 
-        if rep.export_path:
-            print(f"[FLOPpyTracker{run_label}] Export CSV: {rep.export_path}")
+            if rep.use_wandb and rep.wandb_project:
+                print(f"  - W&B Project: {rep.wandb_project}")
 
-        if rep.use_wandb and rep.wandb_project:
-            print(f"[FLOPpyTracker{run_label}] W&B project: {rep.wandb_project}")
+            print("=" * 65)

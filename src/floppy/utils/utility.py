@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class Color(Enum):
     EXPERIMENT_CONFIG_INFO = 2
     EXPERIMENT_STATUS_HIGH_PRIORITY = 3
