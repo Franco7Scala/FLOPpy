@@ -132,18 +132,10 @@ class FLOPpyTracker:
         if model is not None:
             self._model = model
 
-        if optimizer is not None:
-            self._optimizer = optimizer
-
-        if loss_fn is not None:
-            self._loss_fn = loss_fn
-
-        if tokenizer is not None:
-            self._base_tokenizer = tokenizer
-
-        if export_path is not None:
-            self._export_path = export_path
-
+        self._optimizer = optimizer
+        self._loss_fn = loss_fn
+        self._base_tokenizer = tokenizer
+        self._export_path = export_path
         self._use_wandb = use_wandb
         self._wandb_project = wandb_project
         self._wandb_token = wandb_token
@@ -240,7 +232,7 @@ class FLOPpyTracker:
     # Stop + report
     # ------------------------------------------------------------
 
-    def stop(self) -> FLOPpyTracker: 
+    def stop(self) -> FLOPpyTracker:
         """
         Stop monitoring.
         Safe to call multiple times.
@@ -248,19 +240,18 @@ class FLOPpyTracker:
         if not self._is_active:
             return self
 
-        # Keep a local reference before closing
         internal_tracker = self._tracker
 
         if internal_tracker is not None:
             internal_tracker.__exit__(None, None, None)
 
-        # Build report immediately while we still have access
         self._build_report(internal_tracker)
 
         if self.print_summary and self._report is not None and not self._summary_printed:
             self._print_summary()
             self._summary_printed = True
 
+        self._tracker = None
         self._is_active = False
         return self
 
