@@ -28,22 +28,24 @@ class CsvLogger(BaseLogger):
 
         with open(self.export_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
-            writer.writerow(["type", "index", "metric", "value"])
+            writer.writerow(["type", "epoch_idx", "batch_idx", "metric", "value"])
 
             for entry in self._batch_logs:
-                idx = entry.get("batch_idx", "")
+                epoch_idx = entry.get("epoch_idx", "")
+                batch_idx = entry.get("batch_idx", "")
                 for key, value in entry.items():
-                    if key == "batch_idx":
+                    if key in ("epoch_idx", "batch_idx"):
                         continue
-                    writer.writerow(["batch", idx, key, value])
+                    writer.writerow(["batch", epoch_idx, batch_idx, key, value])
 
             for entry in self._epoch_logs:
-                idx = entry.get("epoch_idx", "")
+                epoch_idx = entry.get("epoch_idx", "")
+                batch_idx = entry.get("batch_idx", "")
                 for key, value in entry.items():
-                    if key == "epoch_idx":
+                    if key in ("epoch_idx", "batch_idx"):
                         continue
-                    writer.writerow(["epoch", idx, key, value])
+                    writer.writerow(["epoch", epoch_idx, batch_idx, key, value])
 
             if self._summary_dict is not None:
                 for key, value in self._summary_dict.items():
-                    writer.writerow(["summary", "", key, value])
+                    writer.writerow(["summary", "", "", key, value])
