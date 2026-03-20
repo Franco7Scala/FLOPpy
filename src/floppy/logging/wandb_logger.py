@@ -14,6 +14,7 @@ class WandbLogger(BaseLogger):
         self.wandb_project = wandb_project
         self.wandb_token = wandb_token
         self.run_name = run_name
+
         self._summary_dict = None
         self._wandb = None
         self._run = None
@@ -65,7 +66,9 @@ class WandbLogger(BaseLogger):
 
         if self._run is not None:
             try:
-                self._wandb.log(self._summary_dict)
+                payload = dict(self._summary_dict)
+                payload["log_type"] = "summary"
+                self._wandb.log(payload)
                 self._run.summary.update(self._summary_dict)
             except Exception:
                 pass
