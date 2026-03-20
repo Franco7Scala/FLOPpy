@@ -572,7 +572,6 @@ class TorchBackend(BaseBackend):
         return flop_qkv + flop_scores + flop_attn_v + flop_out
 
     # Embedding
-
     def _embedding_flop(self, layer: nn.Embedding, x):
         num_indices = x.numel()
         emb_dim = layer.embedding_dim

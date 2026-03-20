@@ -5,6 +5,7 @@ import torch
 
 
 class UniversalFlopCounter(TorchDispatchMode):
+
     def __init__(self):
         super().__init__()
         self.flops = 0

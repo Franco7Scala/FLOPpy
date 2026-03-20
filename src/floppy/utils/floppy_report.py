@@ -9,8 +9,8 @@ class FLOPpyReport:
     run_name: Optional[str]
     model_architecture: Optional[str]
     model_device: Optional[str]
-    #loss_type: Optional[str]
-    #optimizer_type: Optional[str]
+    loss_type: Optional[str]
+    optimizer_type: Optional[str]
     backend: str
     model_flop: int
     optimizer_flop: int
@@ -24,7 +24,6 @@ class FLOPpyReport:
     hardware: HardwareInfo
     
     def __str__(self):
-        return ""
         def format_flops(flops: int) -> str:
             if flops == 0:
                 return "0 FLOPs"
@@ -59,28 +58,31 @@ class FLOPpyReport:
                 g_count = h.gpu_count or 1
                 g_name = h.gpu_name or "Unknown GPU"
                 result += f"  - GPU      : {g_count}x {g_name}\n"
+
             else:
                 result += "  - GPU      : None (CPU Only)\n"
 
             # Software
             result += f"  - Python   : {h.python_version}\n"
-
             frameworks = []
             if h.torch_version:
-                frameworks.append(f"PyTorch {h.torch_version}\n")
+                frameworks.append(f"PyTorch {h.torch_version}")
 
             if h.sklearn_version:
-                frameworks.append(f"Scikit-learn {h.sklearn_version}\n")
+                frameworks.append(f"Scikit-learn {h.sklearn_version}")
 
             if frameworks:
                 result += f"  - Libs     : {' | '.join(frameworks)}\n"
 
         # Model and Device details
-        result += "Modules tracked details:"
+        result += "Modules tracked details:\n"
         result += f"  - Device   : {self.model_device}\n"
         result += f"  - Model    : {self.model_architecture}\n"
-        #result += f"  - Loss     : {self.loss_type}\n")
-        #result += f"  - Optimizer: {self.optimizer_type}\n")
+        if self.loss_type is not None:
+            result += f"  - Loss     : {self.loss_type}\n"
+
+        if self.optimizer_type is not None:
+            result += f"  - Optimizer: {self.optimizer_type}\n"
 
         # Computational Workload Breakdown
         result += "Computational Workload Breakdown:\n"

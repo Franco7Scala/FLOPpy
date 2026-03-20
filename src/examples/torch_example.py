@@ -12,6 +12,10 @@ torch.manual_seed(42)
 X = torch.randn(64, 10)
 y = torch.randint(0, 3, (64,))
 
+X = X.to("cuda" if torch.cuda.is_available() else "cpu")
+y = y.to("cuda" if torch.cuda.is_available() else "cpu")
+
+
 dataset = TensorDataset(X, y)
 loader = DataLoader(dataset, batch_size=16, shuffle=False)
 
@@ -27,13 +31,18 @@ model = nn.Sequential(
     nn.Linear(16, 3),
 )
 
+model.to("cuda" if torch.cuda.is_available() else "cpu")
+
 loss_fn = nn.CrossEntropyLoss()
+#optimizer = torch.optim.Adam(model.parameters())
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
+#optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
+#optimizer = torch.optim.RMSprop(model.parameters(), lr=0.01)
+#optimizer = torch.optim.Adagrad(model.parameters(), lr=0.01)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 tracker = FLOPpyTracker(
-    run_name="torch_test_mode1",
-    print_summary=True,
-    print_hardware=True,
+    run_name="torch_test_mode1"
 )
 
 tracker.run(
@@ -69,13 +78,14 @@ model = nn.Sequential(
     nn.Linear(16, 3),
 )
 
+model.to("cuda" if torch.cuda.is_available() else "cpu")
+
+
 loss_fn = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 with FLOPpyTracker(
     run_name="torch_test_mode2",
-    print_summary=True,
-    print_hardware=True,
 ) as tracker:
 
     tracker.start(
@@ -101,4 +111,5 @@ with FLOPpyTracker(
 
     tracker.stop()
 
-print(tracker.report())
+report = tracker.report()
+print(report)
