@@ -240,7 +240,7 @@ class FLOPpyTracker:
     # Stop + report
     # ------------------------------------------------------------
 
-    def stop(self) -> FLOPpyTracker:
+    def stop(self) -> FLOPpyTracker: 
         """
         Stop monitoring.
         Safe to call multiple times.
@@ -248,11 +248,14 @@ class FLOPpyTracker:
         if not self._is_active:
             return self
 
-        if self._tracker is not None:
-            self._tracker.__exit__(None, None, None)
-            self._tracker = None
+        # Keep a local reference before closing
+        internal_tracker = self._tracker
 
-        self._build_report()
+        if internal_tracker is not None:
+            internal_tracker.__exit__(None, None, None)
+
+        # Build report immediately while we still have access
+        self._build_report(internal_tracker)
 
         if self.print_summary and self._report is not None and not self._summary_printed:
             self._print_summary()
@@ -270,26 +273,29 @@ class FLOPpyTracker:
             self.stop()
 
         if self._report is None:
-            self._build_report()
+            self._build_report(self._tracker)
 
         if self._report is None:
             raise RuntimeError("No report available. Start monitoring before requesting a report.")
 
         return self._report
 
-    def _build_report(self) -> None:
+    def _build_report(self, tracker_obj: Optional[Tracker] = None) -> None:
         """
         Internal helper to build the final FLOPpyReport.
         """
-        if self._tracker is None:
+        if tracker_obj is None:
+            tracker_obj = self._tracker
+
+        if tracker_obj is None:
             return
 
-        model_flop = int(getattr(self._tracker, "total_model_flop", 0))
-        optimizer_flop = int(getattr(self._tracker, "total_optimizer_flop", 0))
-        loss_forward_flop = int(getattr(self._tracker, "total_loss_forward_flop", 0))
-        loss_backward_flop = int(getattr(self._tracker, "total_loss_backward_flop", 0))
-        preproc_ops = int(getattr(self._tracker, "total_preproc_ops", 0))
-        overall_flop = int(getattr(self._tracker, "total_overall_flop", 0))
+        model_flop = int(getattr(tracker_obj, "total_model_flop", 0))
+        optimizer_flop = int(getattr(tracker_obj, "total_optimizer_flop", 0))
+        loss_forward_flop = int(getattr(tracker_obj, "total_loss_forward_flop", 0))
+        loss_backward_flop = int(getattr(tracker_obj, "total_loss_backward_flop", 0))
+        preproc_ops = int(getattr(tracker_obj, "total_preproc_ops", 0))
+        overall_flop = int(getattr(tracker_obj, "total_overall_flop", 0))
 
         model_architecture = "unknown"
         model_device = "CPU"
@@ -307,7 +313,7 @@ class FLOPpyTracker:
 
         self._report = FLOPpyReport(
             run_name=self.run_name,
-            backend=self._tracker.backend.__class__.__name__.replace("Backend", "").lower(),
+            backend=tracker_obj.backend.__class__.__name__.replace("Backend", "").lower(),
             model_architecture=model_architecture,
             model_device=model_device,
             model_flop=model_flop,
@@ -321,7 +327,7 @@ class FLOPpyTracker:
             wandb_project=self._wandb_project,
             hardware=self._hardware,
         )
-
+   
     # ------------------------------------------------------------
     # Context manager support
     # ------------------------------------------------------------
