@@ -9,7 +9,6 @@ import os
 class WandbLogger(BaseLogger):
 
     def __init__(self, reporter_key: str, project_name: str | None = None, group_name: str | None = None, run_name: str | None = None):
-        self._summary_dict = None
         self._run = None
         os.environ["WANDB_SILENT"] = "true"
         os.environ["WANDB_CONSOLE"] = "off"
@@ -42,14 +41,14 @@ class WandbLogger(BaseLogger):
         return summary
 
     def log_summary(self, summary: dict):
-        self._summary_dict = dict(summary)
+        summary_dict = dict(summary)
         if self._run is not None:
-            payload = dict(self._summary_dict)
+            payload = dict(summary_dict)
             payload["log_type"] = "summary"
             wandb.log(payload)
-            self._run.summary.update(self._summary_dict)
+            self._run.summary.update(summary_dict)
 
-        return self._summary_dict
+        return summary_dict
 
     def close(self):
         if self._run is not None:
