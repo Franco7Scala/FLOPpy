@@ -8,6 +8,10 @@ jobs:
   build-n-publish:
     name: Build and publish Python distro to PyPI
     runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/floppy
+
     permissions:
       id-token: write
       contents: read
