@@ -26,8 +26,6 @@ model = RandomForestClassifier(n_estimators=100)
 
 tracker = FLOPpyTracker(
     run_name="sklearn_test",
-    print_summary=True,
-    print_hardware=True,
 )
 
 tracker.run(model=model)
@@ -35,7 +33,8 @@ tracker.run(model=model)
 model.fit(X_train, y_train)
 preds = model.predict(X_test)
 
-print(tracker.report())
+report = tracker.report()
+print(report)
 
 # ============================================================
 # MODE 2: context manager style
@@ -45,8 +44,6 @@ model = RandomForestClassifier(n_estimators=100)
 
 with FLOPpyTracker(
     run_name="sklearn_test_with",
-    print_summary=True,
-    print_hardware=True,
 ) as tracker:
 
     tracker.start(model=model)
@@ -56,4 +53,5 @@ with FLOPpyTracker(
 
     tracker.stop()
 
-print(tracker.report())
+report = tracker.report()
+print(report)

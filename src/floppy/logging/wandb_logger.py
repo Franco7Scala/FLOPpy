@@ -1,20 +1,29 @@
 from __future__ import annotations
 from .base_logger import BaseLogger
+from ..utils.utility import cprint, Color
 
 import wandb
+import os
 
 
 class WandbLogger(BaseLogger):
 
-    def __init__(self, wandb_token: str, wandb_project: str | None = None, run_name: str | None = None):
-        self.wandb_project = wandb_project
-        self.wandb_token = wandb_token
-        self.run_name = run_name
+    def __init__(self, reporter_key: str, project_name: str | None = None, group_name: str | None = None, run_name: str | None = None):
         self._summary_dict = None
         self._run = None
-        wandb.login(key=self.wandb_token)
-        self._run = wandb.init(project=self.wandb_project or "floppy", name=self.run_name, reinit=True)
+        os.environ["WANDB_SILENT"] = "true"
+        os.environ["WANDB_CONSOLE"] = "off"
+        wandb.login(key=reporter_key)
+        try:
+            self._run = wandb.init(entity=group_name, project=project_name, name=run_name, settings=wandb.Settings(quiet=True, silent=True))
 
+        except Exception as e:
+            self._run = None
+            error_msg = str(e).split(":")[-1].strip() if ":" in str(e) else str(e)
+            if "401" in str(e):
+                error_msg = "Invalid API Key or Unauthorized (401)"
+
+            cprint(f"Failed to initialize Weights & Biases logger: {error_msg}", Color.WARNING)
 
     def log_batch(self, summary: dict):
         if self._run is not None:

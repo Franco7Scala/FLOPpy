@@ -22,8 +22,6 @@ model = AutoModelForSequenceClassification.from_pretrained(model_name)
 
 tracker = FLOPpyTracker(
     run_name="hf_transformer_test",
-    print_summary=True,
-    print_hardware=True,
 )
 
 tracker.run(model=model, tokenizer=base_tokenizer)
@@ -38,7 +36,8 @@ inputs = tracker.tokenizer(
 with torch.no_grad():
     outputs = model(**inputs)
 
-print(tracker.report())
+report = tracker.report()
+print(report)
 
 
 # ============================================================
@@ -49,8 +48,6 @@ model = AutoModelForSequenceClassification.from_pretrained(model_name)
 
 with FLOPpyTracker(
     run_name="hf_transformer_test_with",
-    print_summary=True,
-    print_hardware=True,
 ) as tracker:
 
     tracker.start(model=model, tokenizer=base_tokenizer)
@@ -67,4 +64,5 @@ with FLOPpyTracker(
 
     tracker.stop()
 
-print(tracker.report())
+report = tracker.report()
+print(report)

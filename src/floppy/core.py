@@ -5,6 +5,7 @@ from .backends import create_backend
 from .logging import create_logger
 from .utils.hooks.training_hooks import TorchTrainingHooks
 from .utils.tokenizer_ops import wrap_tokenizer
+from .utils.wandb_configuration import WandbConfiguration
 
 
 class Tracker(AbstractContextManager):
@@ -23,16 +24,12 @@ class Tracker(AbstractContextManager):
         model,
         backend: str = "auto",
         export_path: Optional[str] = None,
-        use_wandb: bool = False,
-        wandb_project: Optional[str] = None,
-        wandb_token: Optional[str] = None,
+        wandb_config: Optional[WandbConfiguration] = None,
         run_name: Optional[str] = None,
     ):
         self.logger = create_logger(
             export_path=export_path,
-            use_wandb=use_wandb,
-            wandb_project=wandb_project,
-            wandb_token=wandb_token,
+            wandb_config=wandb_config,
             run_name=run_name,
         )
         self.backend = create_backend(model, backend, logger=self.logger)

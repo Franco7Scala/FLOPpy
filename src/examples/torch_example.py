@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 from floppy import FLOPpyTracker
+from floppy.utils.wandb_configuration import WandbConfiguration
 
 # ------------------------------------------------------------
 # Shared setup
@@ -15,11 +16,12 @@ y = torch.randint(0, 3, (64,))
 X = X.to("cuda" if torch.cuda.is_available() else "cpu")
 y = y.to("cuda" if torch.cuda.is_available() else "cpu")
 
+wandb_config = WandbConfiguration(project_name="torch_test_mode1",group_name="eDPO", reporter_key="your_wandb_key_here")
 
 dataset = TensorDataset(X, y)
 loader = DataLoader(dataset, batch_size=16, shuffle=False)
 
-num_epochs = 2
+num_epochs = 15
 
 # ============================================================
 # MODE 1
@@ -50,6 +52,7 @@ tracker.run(
     optimizer=optimizer,
     loss_fn=loss_fn,
     export_path="torch_test_mode1.csv",
+    wandb_config=wandb_config
 )
 
 model.train()

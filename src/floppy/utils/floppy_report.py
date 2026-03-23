@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 from floppy.utils.hardware_info import HardwareInfo
+from floppy.utils.wandb_configuration import WandbConfiguration
 
 
 @dataclass
@@ -19,8 +20,7 @@ class FLOPpyReport:
     preproc_ops: int
     overall_flop: int
     export_path: Optional[str]
-    use_wandb: bool
-    wandb_project: Optional[str]
+    wandb_config: Optional[WandbConfiguration]
     hardware: HardwareInfo
     
     def __str__(self):
@@ -104,13 +104,14 @@ class FLOPpyReport:
         result += f"OVERALL TOTAL FLOPs         : {format_flops(self.overall_flop):>15}\n"
         result += "=" * 70 + "\n"
         # Integrations
-        if self.export_path or (self.use_wandb and self.wandb_project):
+        if self.export_path or self.wandb_config:
             result += "Tracking & Integrations:\n"
             if self.export_path:
                 result += f"  - Export Path: {self.export_path}\n"
 
-            if self.use_wandb and self.wandb_project:
-                result += f"  - W&B Project: {self.wandb_project}\n"
+            if self.wandb_config:
+                result += f"  - W&B Project: {self.wandb_config.project_name}\n"
+                result += f"  - W&B group: {self.wandb_config.group_name}\n"
 
             result += "=" * 70 + "\n"
 

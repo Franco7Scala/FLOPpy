@@ -24,8 +24,6 @@ model.config.pad_token_id = base_tokenizer.pad_token_id
 
 tracker = FLOPpyTracker(
     run_name="hf_generate_test",
-    print_summary=True,
-    print_hardware=True,
 )
 
 tracker.run(model=model, tokenizer=base_tokenizer)
@@ -42,7 +40,8 @@ with torch.no_grad():
         pad_token_id=base_tokenizer.pad_token_id,
     )
 
-print(tracker.report())
+report = tracker.report()
+print(report)
 
 # ============================================================
 # MODE 2: context-manager style
@@ -53,8 +52,6 @@ model.config.pad_token_id = base_tokenizer.pad_token_id
 
 with FLOPpyTracker(
     run_name="hf_generate_test_with",
-    print_summary=True,
-    print_hardware=True,
 ) as tracker:
 
     tracker.start(model=model, tokenizer=base_tokenizer)
@@ -73,4 +70,5 @@ with FLOPpyTracker(
 
     tracker.stop()
 
-print(tracker.report())
+report = tracker.report()
+print(report)

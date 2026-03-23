@@ -6,6 +6,7 @@ from .backends.sklearn_backend import SklearnBackend
 from .utils.floppy_report import FLOPpyReport
 from .utils.hardware_info import get_hardware_info, HardwareInfo
 from .utils.tokenizer_ops import TokenizerWithOps
+from .utils.wandb_configuration import WandbConfiguration
 
 
 class FLOPpyTracker:
@@ -50,9 +51,7 @@ class FLOPpyTracker:
         self._base_tokenizer: Optional[Any] = None
         self._wrapped_tokenizer: Optional[TokenizerWithOps] = None
         self._export_path: Optional[str] = None
-        self._use_wandb: bool = False
-        self._wandb_project: Optional[str] = None
-        self._wandb_token: Optional[str] = None
+        self._wandb_config: Optional[WandbConfiguration] = None
         self._hooks_debug_print: bool = False
         self._hardware: Optional[HardwareInfo] = None
         self._is_active: bool = False
@@ -87,13 +86,21 @@ class FLOPpyTracker:
         loss_fn: Optional[Any] = None,
         tokenizer: Optional[Any] = None,
         export_path: Optional[str] = None,
-        use_wandb: bool = False,
-        wandb_project: Optional[str] = None,
-        wandb_token: Optional[str] = None,
-        hooks_debug_print: bool = False,
+        wandb_config: Optional[WandbConfiguration] = None
     ) -> FLOPpyTracker:
         """
         Configure and immediately start monitoring.
+
+        Args:
+            model: The model to monitor.
+            optimizer (Optional[Optimizer]): The optimizer to monitor.
+            loss_fn (Optional[Any]): The loss function to monitor.
+            tokenizer (Optional[Any]): The tokenizer to monitor.
+            export_path (Optional[str]): Local path to export the report.
+            wandb_config (Optional[WandbConfiguration]): Weights & Biases configuration containing project name and token.
+
+        Returns:
+            FLOPpyTracker: The tracker instance.
         """
         return self.start(
             model=model,
@@ -101,10 +108,7 @@ class FLOPpyTracker:
             loss_fn=loss_fn,
             tokenizer=tokenizer,
             export_path=export_path,
-            use_wandb=use_wandb,
-            wandb_project=wandb_project,
-            wandb_token=wandb_token,
-            hooks_debug_print=hooks_debug_print,
+            wandb_config=wandb_config
         )
 
     def start(
@@ -114,10 +118,7 @@ class FLOPpyTracker:
         loss_fn: Optional[Any] = None,
         tokenizer: Optional[Any] = None,
         export_path: Optional[str] = None,
-        use_wandb: bool = False,
-        wandb_project: Optional[str] = None,
-        wandb_token: Optional[str] = None,
-        hooks_debug_print: bool = False,
+        wandb_config: Optional[WandbConfiguration] = None
     ) -> FLOPpyTracker:
         """
         Start monitoring.
@@ -137,10 +138,8 @@ class FLOPpyTracker:
         self._loss_fn = loss_fn
         self._base_tokenizer = tokenizer
         self._export_path = export_path
-        self._use_wandb = use_wandb
-        self._wandb_project = wandb_project
-        self._wandb_token = wandb_token
-        self._hooks_debug_print = hooks_debug_print
+        self._wandb_config = wandb_config
+        self._hooks_debug_print = False
 
         if self._model is None:
             raise RuntimeError("A model must be provided before starting monitoring.")
@@ -157,9 +156,7 @@ class FLOPpyTracker:
             model=self._model,
             backend="auto",
             export_path=self._export_path,
-            use_wandb=self._use_wandb,
-            wandb_project=self._wandb_project,
-            wandb_token=self._wandb_token,
+            wandb_config=self._wandb_config,
             run_name=self.run_name,
         )
         self._tracker.__enter__()
@@ -204,11 +201,11 @@ class FLOPpyTracker:
         if not self._is_active or self._tracker is None:
             raise RuntimeError("batch() requires an active monitoring session.")
 
-        self._batch_idx += 1
         snapshot = self._build_progress_snapshot()
         if self._tracker.logger is not None and hasattr(self._tracker.logger, "log_batch"):
             self._tracker.logger.log_batch(snapshot)
 
+        self._batch_idx += 1
         return snapshot
 
     def epoch(self) -> dict:
@@ -219,11 +216,11 @@ class FLOPpyTracker:
         if not self._is_active or self._tracker is None:
             raise RuntimeError("epoch() requires an active monitoring session.")
 
-        self._epoch_idx += 1
         snapshot = self._build_progress_snapshot()
         if self._tracker.logger is not None and hasattr(self._tracker.logger, "log_epoch"):
             self._tracker.logger.log_epoch(snapshot)
 
+        self._epoch_idx += 1
         return snapshot
 
     # ------------------------------------------------------------
@@ -239,7 +236,6 @@ class FLOPpyTracker:
             return self
 
         internal_tracker = self._tracker
-
         if internal_tracker is not None:
             internal_tracker.__exit__(None, None, None)
 
@@ -311,8 +307,7 @@ class FLOPpyTracker:
             preproc_ops=preproc_ops,
             overall_flop=overall_flop,
             export_path=self._export_path,
-            use_wandb=self._use_wandb,
-            wandb_project=self._wandb_project,
+            wandb_config=self._wandb_config,
             hardware=self._hardware
         )
    
@@ -342,7 +337,7 @@ class FLOPpyTracker:
         """
         if self._tracker is None:
             raise RuntimeError(
-                "wrap_tokenizer(...) requires an active Tracker. "
+                "wrap_tokenizer(...) requires an active Tracker."
                 "Use start(...) or run(...) first."
             )
 

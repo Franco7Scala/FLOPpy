@@ -1,6 +1,7 @@
 from __future__ import annotations
 from .csv_logger import CsvLogger
 from .wandb_logger import WandbLogger
+from ..utils.wandb_configuration import WandbConfiguration
 
 
 class CompositeLogger:
@@ -36,17 +37,15 @@ class CompositeLogger:
 
 def create_logger(
     export_path: str | None = None,
-    use_wandb: bool = False,
-    wandb_project: str | None = None,
-    wandb_token: str | None = None,
+    wandb_config: WandbConfiguration | None = None,
     run_name: str | None = None,
 ):
     loggers = []
     if export_path is not None:
         loggers.append(CsvLogger(export_path=export_path))
 
-    if use_wandb:
-        loggers.append(WandbLogger(wandb_project=wandb_project, wandb_token=wandb_token, run_name=run_name))
+    if wandb_config is not None:
+        loggers.append(WandbLogger(project_name=wandb_config.project_name, group_name=wandb_config.group_name, reporter_key=wandb_config.reporter_key, run_name=run_name))
 
     active = [l for l in loggers if l is not None]
     if not active:
