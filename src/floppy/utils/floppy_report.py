@@ -15,7 +15,7 @@ class FLOPpyReport:
     run_name: Optional[str]
     #: The structural class name of the monitored model (e.g., 'ResNet', 'RandomForest')
     model_architecture: Optional[str]
-    #: The hardware device where the model is allocated (e.g., 'cpu', 'cuda:0').
+    #: The hardware device where the model is allocated (e.g., 'cpu', 'cuda').
     model_device: Optional[str]
     #: The name of the loss function used during training.
     loss_type: Optional[str]
