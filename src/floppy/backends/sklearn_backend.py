@@ -70,8 +70,14 @@ class SklearnBackend(BaseBackend):
     def _wrap_fit(self, fn: Callable) -> Callable:
         def wrapped(X, y=None, *args, **kwargs):
             result = fn(X, y, *args, **kwargs)
-            flop = self._estimate_fit_flop(np.asarray(X), y)
-            self._accumulate_call(flop)
+            x_arr = np.asarray(X)
+            flop = self._estimate_fit_flop(x_arr, y)
+
+            # Calculate BOPs based on input data precision
+            bit_width = self._get_numpy_bit_width(x_arr)
+            bops = int(flop * bit_width)
+
+            self._accumulate_call(flop, bops)
             return result
 
         return wrapped
@@ -81,7 +87,12 @@ class SklearnBackend(BaseBackend):
             x_arr = np.asarray(X)
             y_pred = fn(X, *args, **kwargs)
             flop = self._estimate_predict_flop(x_arr, np.asarray(y_pred))
-            self._accumulate_call(flop)
+
+            # Calculate BOPs based on input data precision
+            bit_width = self._get_numpy_bit_width(x_arr)
+            bops = int(flop * bit_width)
+
+            self._accumulate_call(flop, bops)
             return y_pred
 
         return wrapped
@@ -91,7 +102,12 @@ class SklearnBackend(BaseBackend):
             x_arr = np.asarray(X)
             proba = fn(X, *args, **kwargs)
             flop = self._estimate_predict_flop(x_arr, np.asarray(proba))
-            self._accumulate_call(flop)
+
+            # Calculate BOPs based on input data precision
+            bit_width = self._get_numpy_bit_width(x_arr)
+            bops = int(flop * bit_width)
+
+            self._accumulate_call(flop, bops)
             return proba
 
         return wrapped
@@ -101,7 +117,12 @@ class SklearnBackend(BaseBackend):
             x_arr = np.asarray(X)
             z = fn(X, *args, **kwargs)
             flop = self._estimate_transform_flop(x_arr, np.asarray(z))
-            self._accumulate_call(flop)
+
+            # Calculate BOPs based on input data precision
+            bit_width = self._get_numpy_bit_width(x_arr)
+            bops = int(flop * bit_width)
+
+            self._accumulate_call(flop, bops)
             return z
 
         return wrapped
@@ -110,11 +131,37 @@ class SklearnBackend(BaseBackend):
     # FLOP accumulation
     # ------------------------------------------------------------
 
-    def _accumulate_call(self, flop: int):
-        value = int(flop)
-        self._last_batch_flop = value
-        self.total_flop += value
+    def _accumulate_call(self, flop: int, bop: int):
         self._batch_idx += 1
+        value_flop = int(flop)
+        value_bop = int(bop)
+        self._last_batch_flop = value_flop
+        self.total_flop += value_flop
+        self.total_bop += value_bop
+
+    def _get_numpy_bit_width(self, x_arr: np.ndarray) -> int:
+        """
+        Determines the bit-width of the NumPy array used for computation.
+        Scikit-learn predominantly uses float64 internally, but tracking the
+        input dtype provides a baseline for hardware effort estimation.
+        """
+        if x_arr is None or not hasattr(x_arr, "dtype"):
+            return 64  # sklearn defaults to float64
+
+        dtype = x_arr.dtype
+        if dtype in (np.float64, np.int64, np.complex128):
+            return 64
+
+        elif dtype in (np.float32, np.int32, np.complex64):
+            return 32
+
+        elif dtype in (np.float16, np.int16):
+            return 16
+
+        elif dtype in (np.int8, np.uint8):
+            return 8
+
+        return 64  # Default fallback
 
     # ------------------------------------------------------------
     # Iteration helpers

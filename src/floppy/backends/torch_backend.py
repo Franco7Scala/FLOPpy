@@ -38,6 +38,7 @@ class TorchBackend(BaseBackend):
         self._layer_handles: list[torch.utils.hooks.RemovableHandle] = []
         self._root_handles: list[torch.utils.hooks.RemovableHandle] = []
         self._current_forward_flop: int = 0
+        self._current_forward_bop: int = 0
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------
@@ -147,12 +148,18 @@ class TorchBackend(BaseBackend):
     # ------------------------------------------------------------
     def _on_forward_start(self, module, inputs):
         self._current_forward_flop = 0
+        self._current_forward_bop = 0
 
     def _on_forward_end(self, module, inputs, output):
+        self._batch_idx += 1
+        # FLOP
         forward_flop = int(self._current_forward_flop)
         self._last_batch_flop = forward_flop
         self.total_flop += forward_flop
-        self._batch_idx += 1
+        # BOP
+        forward_bop = int(self._current_forward_bop)
+        self._last_batch_bop = forward_bop
+        self.total_bop += forward_bop
 
     # ------------------------------------------------------------
     # Layer hook 
@@ -278,7 +285,62 @@ class TorchBackend(BaseBackend):
             flop = 0
 
         with self._lock:
+            # Accumulate pure FLOPs (Algorithmic complexity)
             self._current_forward_flop += int(flop)
+            # Extract the effective bit-width, accounting for packed/quantized tensors
+            bit_width = self._get_effective_bit_width(layer, x)
+            # Calculate hardware computational effort (Bit-Operations or BOPs)
+            bop = int(flop) * bit_width
+            self._current_forward_bop += bop
+
+    def _get_effective_bit_width(self, layer: nn.Module, tensor: torch.Tensor) -> int:
+        """
+        Determines the effective bit-width of the operations.
+        It inspects both the tensor dtype and specific layer attributes to
+        correctly identify "packed" quantized tensors (e.g., INT4, INT2)
+        from libraries like bitsandbytes, AutoGPTQ, or AWQ.
+        """
+        # 1. Check via layer class name (e.g., bitsandbytes wrappers)
+        layer_class_name = layer.__class__.__name__
+
+        if "Linear4bit" in layer_class_name:
+            return 4
+        if "Linear8bit" in layer_class_name:
+            return 8
+
+        # 2. Check custom attributes (used by AutoGPTQ, AWQ, or custom Parameters)
+        # Many quantization libraries add a "bits" attribute to the layer or its config
+        if hasattr(layer, "bits"):
+            return int(getattr(layer, "bits"))
+
+        if hasattr(layer, "quantize_config") and hasattr(layer.quantize_config, "bits"):
+            return int(layer.quantize_config.bits)
+
+        # Some custom tensors (like Params4bit in bitsandbytes) store the attribute directly
+        if hasattr(tensor, "bits"):
+            return int(getattr(tensor, "bits"))
+
+        # 3. Fallback to standard PyTorch dtypes
+        if tensor is not None and hasattr(tensor, "dtype"):
+            dtype = tensor.dtype
+            if dtype in (torch.float64, torch.int64, torch.complex128):
+                return 64
+
+            elif dtype in (torch.float32, torch.int32, torch.complex64):
+                return 32
+
+            elif dtype in (torch.float16, torch.bfloat16, torch.int16):
+                return 16
+
+            elif dtype in (torch.int8, torch.uint8, torch.qint8):
+                return 8
+
+            # Support for experimental 4-bit dtypes in PyTorch 2.2+
+            elif str(dtype) in ("torch.quint4x2", "torch.int4"):
+                return 4
+
+        # Fallback: assume FP32 if the bit-width cannot be inferred
+        return 32
 
     # ------------------------------------------------------------
     # FLOP formulas
