@@ -11,7 +11,26 @@ import subprocess
 
 
 @dataclass
-class HardwareInfo:
+class SystemInfo:
+    """
+        A snapshot of the hardware and software environment where the model is executed.
+
+        Attributes:
+            os (str): The name of the operating system (e.g., 'Linux', 'Windows').
+            os_version (str): The specific release version of the operating system.
+            machine (str): The hardware architecture of the machine (e.g., 'x86_64', 'AMD64').
+            processor (str): The processor family or detailed name provided by the system.
+            python_version (str): The version of Python currently running the tracker.
+            cpu_name (str, optional): The specific model name of the CPU (e.g., 'Intel Core i9').
+            cpu_cores_logical (int, optional): The number of logical CPU cores (including hyperthreading).
+            cpu_cores_physical (int, optional): The number of physical CPU cores.
+            ram_total_gb (float, optional): The total amount of system RAM available, expressed in Gigabytes.
+            cuda_available (bool, optional): Indicates whether a CUDA-enabled GPU is accessible to PyTorch.
+            gpu_name (str, optional): The model name of the primary GPU detected (e.g., 'NVIDIA RTX 4090').
+            gpu_count (int, optional): The total number of GPUs available on the system.
+            torch_version (str, optional): The installed version of the PyTorch library.
+            sklearn_version (str, optional): The installed version of the Scikit-learn library.
+    """
     os: str
     os_version: str
     machine: str
@@ -57,7 +76,7 @@ def _get_cpu_name() -> Optional[str]:
     # Fallback if the OS-specific commands fail
     return platform.processor() or "Unknown CPU"
 
-def get_hardware_info() -> HardwareInfo:
+def get_system_info() -> SystemInfo:
     os_name = platform.system()
     os_ver = platform.version()
     machine = platform.machine()
@@ -79,7 +98,7 @@ def get_hardware_info() -> HardwareInfo:
         gpu_count = None
         gpu_name = None
 
-    return HardwareInfo(
+    return SystemInfo(
         os=os_name,
         os_version=os_ver,
         machine=machine,

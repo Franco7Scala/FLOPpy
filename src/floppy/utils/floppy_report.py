@@ -1,12 +1,33 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
-from floppy.utils.hardware_info import HardwareInfo
+from floppy.utils.system_info import SystemInfo
 from floppy.utils.wandb_configuration import WandbConfiguration
 
 
 @dataclass
 class FLOPpyReport:
+    """
+        A comprehensive report containing the aggregated computational workload
+        and hardware statistics of a monitored machine learning run.
+
+        Attributes:
+            run_name (str, optional): The custom name assigned to this tracking session.
+            model_architecture (str, optional): The structural class name of the monitored model (e.g., 'ResNet', 'RandomForest').
+            model_device (str, optional): The hardware device where the model is allocated (e.g., 'cpu', 'cuda:0').
+            loss_type (str, optional): The name of the loss function used during training.
+            optimizer_type (str, optional): The name of the optimizer used for weight updates.
+            backend (str): The specific FLOPpy backend utilized (e.g., 'pytorch', 'sklearn').
+            model_flop (int): The total Floating Point Operations consumed by the model's structural layers.
+            optimizer_flop (int): The computational overhead (in FLOPs) introduced by the optimizer step.
+            loss_forward_flop (int): The FLOPs consumed during the loss function evaluation.
+            loss_backward_flop (int): The FLOPs consumed during the loss gradient computation.
+            preproc_ops (int): The operations workload for input preparation (e.g., tokenization steps).
+            overall_flop (int): The total aggregated FLOPs across the entire tracked pipeline.
+            export_path (str, optional): The file system path where the CSV report is saved, if applicable.
+            wandb_config (WandbConfiguration, optional): The Weights & Biases configuration used for real-time logging.
+            system (SystemInfo): A snapshot of the execution environment's hardware specifications.
+    """
     run_name: Optional[str]
     model_architecture: Optional[str]
     model_device: Optional[str]
@@ -21,7 +42,7 @@ class FLOPpyReport:
     overall_flop: int
     export_path: Optional[str]
     wandb_config: Optional[WandbConfiguration]
-    hardware: HardwareInfo
+    system: SystemInfo
     
     def __str__(self):
         def format_flops(flops: int) -> str:
@@ -42,10 +63,10 @@ class FLOPpyReport:
         result += "=" * 70 + "\n"
         result += f" FLOPpyTracker Summary{run_label}\n"
         result += "=" * 70 + "\n"
-        # Hardware Info
-        if self.hardware is not None:
-            h = self.hardware
-            result += "Hardware Environment:\n"
+        # System Info
+        if self.system is not None:
+            h = self.system
+            result += "System Environment:\n"
             # System & RAM
             ram_str = f"{h.ram_total_gb:.0f} GB RAM" if h.ram_total_gb else "Unknown RAM"
             result += f"  - System   : {h.os} ({h.machine}) | {ram_str}\n"

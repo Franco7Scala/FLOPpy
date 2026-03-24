@@ -4,7 +4,7 @@ from torch.optim import Optimizer
 from .core import Tracker
 from .backends.sklearn_backend import SklearnBackend
 from .utils.floppy_report import FLOPpyReport
-from .utils.hardware_info import get_hardware_info, HardwareInfo
+from .utils.system_info import get_system_info, SystemInfo
 from .utils.tokenizer_ops import TokenizerWithOps
 from .utils.wandb_configuration import WandbConfiguration
 
@@ -53,7 +53,7 @@ class FLOPpyTracker:
         self._export_path: Optional[str] = None
         self._wandb_config: Optional[WandbConfiguration] = None
         self._hooks_debug_print: bool = False
-        self._hardware: Optional[HardwareInfo] = None
+        self._hardware: Optional[SystemInfo] = None
         self._is_active: bool = False
         self._summary_printed: bool = False
 
@@ -151,7 +151,7 @@ class FLOPpyTracker:
         # Reset logging counters at every new run
         self._epoch_idx = 0
         self._batch_idx = 0
-        self._hardware = get_hardware_info()
+        self._hardware = get_system_info()
         self._tracker = Tracker(
             model=self._model,
             backend="auto",
@@ -308,7 +308,7 @@ class FLOPpyTracker:
             overall_flop=overall_flop,
             export_path=self._export_path,
             wandb_config=self._wandb_config,
-            hardware=self._hardware
+            system=self._hardware
         )
    
     # ------------------------------------------------------------

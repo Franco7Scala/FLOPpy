@@ -18,6 +18,6 @@ Reporting and Metrics
    :members:
    :undoc-members:
 
-.. autoclass:: floppy.utils.hardware_info.HardwareInfo
+.. autoclass:: floppy.utils.system_info.SystemInfo
    :members:
    :undoc-members:

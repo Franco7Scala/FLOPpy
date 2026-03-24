@@ -1,5 +1,5 @@
 from .tracker import FLOPpyTracker
 from .utils.floppy_report import FLOPpyReport
-from .utils.hardware_info import HardwareInfo
+from .utils.system_info import SystemInfo
 
-__all__ = ["FLOPpyTracker", "HardwareInfo", "FLOPpyReport"]
+__all__ = ["FLOPpyTracker", "SystemInfo", "FLOPpyReport"]
