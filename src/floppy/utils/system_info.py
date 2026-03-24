@@ -16,33 +16,33 @@ class SystemInfo:
         A snapshot of the hardware and software environment where the model is executed.
     """
 
-    #  The name of the operating system (e.g., 'Linux', 'Windows').
+    #:  The name of the operating system (e.g., 'Linux', 'Windows').
     os: str
-    # The specific release version of the operating system.
+    #: The specific release version of the operating system.
     os_version: str
-    # The hardware architecture of the machine (e.g., 'x86_64', 'AMD64').
+    #: The hardware architecture of the machine (e.g., 'x86_64', 'AMD64').
     machine: str
-    # The processor family or detailed name provided by the system.
+    #: The processor family or detailed name provided by the system.
     processor: str
-    # The version of Python currently running the tracker.
+    #: The version of Python currently running the tracker.
     python_version: str
-    # The specific model name of the CPU (e.g., 'Intel Core i9').
+    #: The specific model name of the CPU (e.g., 'Intel Core i9').
     cpu_name: Optional[str]
-    # The number of logical CPU cores (including hyperthreading).
+    #: The number of logical CPU cores (including hyperthreading).
     cpu_cores_logical: Optional[int]
-    # The number of physical CPU cores.
+    #: The number of physical CPU cores.
     cpu_cores_physical: Optional[int]
-    # The total amount of system RAM available, expressed in Gigabytes.
+    #: The total amount of system RAM available, expressed in Gigabytes.
     ram_total_gb: Optional[float]
-    # Indicates whether a CUDA-enabled GPU is accessible to PyTorch.
+    #: Indicates whether a CUDA-enabled GPU is accessible to PyTorch.
     cuda_available: Optional[bool]
-    # The model name of the primary GPU detected (e.g., 'NVIDIA RTX 4090').
+    #: The model name of the primary GPU detected (e.g., 'NVIDIA RTX 4090').
     gpu_name: Optional[str]
-    # The total number of GPUs available on the system.
+    #: The total number of GPUs available on the system.
     gpu_count: Optional[int]
-    # The installed version of the PyTorch library.
+    #: The installed version of the PyTorch library.
     torch_version: Optional[str]
-    # The installed version of the Scikit-learn library.
+    #: The installed version of the Scikit-learn library.
     sklearn_version: Optional[str]
 
 
