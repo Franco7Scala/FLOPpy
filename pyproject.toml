@@ -35,7 +35,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/Franco7Scala/FLOPpy"
 "Bug Tracker" = "https://github.com/Franco7Scala/FLOPpy/issues"
-Documentation = "https://github.com/Franco7Scala/FLOPpy/tree/main/documentation"
+Documentation = "https://floppy.readthedocs.io/en/latest/"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,12 +1,12 @@
 API Reference
 =============
 
-This section contains the comprehensive API documentation for FLOPpy, automatically extracted from the source code's docstrings.
+This section contains the comprehensive API documentation for FLOPpy.
 
 Core Tracker
 ------------
 
-.. autoclass:: floppy.<filename>.FLOPpyTracker
+.. autoclass:: floppy.tracker.FLOPpyTracker
    :members:
    :undoc-members:
    :show-inheritance:
@@ -14,10 +14,10 @@ Core Tracker
 Reporting and Metrics
 ---------------------
 
-.. autoclass:: floppy.<filename>.FLOPpyReport
+.. autoclass:: floppy.utils.floppy_report.FLOPpyReport
    :members:
    :undoc-members:
 
-.. autoclass:: floppy.<filename>.HardwareInfo
+.. autoclass:: floppy.utils.hardware_info.HardwareInfo
    :members:
    :undoc-members:
