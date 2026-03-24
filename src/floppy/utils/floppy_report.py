@@ -10,51 +10,37 @@ class FLOPpyReport:
     """
         A comprehensive report containing the aggregated computational workload and hardware statistics of a monitored machine learning run.
     """
-
-    run_name: Optional[str]
-    """ The custom name assigned to this tracking session."""
-
-    model_architecture: Optional[str]
-    """The structural class name of the monitored model (e.g., 'ResNet', 'RandomForest')"""
-
-    model_device: Optional[str]
-    """The hardware device where the model is allocated (e.g., 'cpu', 'cuda:0')."""
-
-    loss_type: Optional[str]
-    """The name of the loss function used during training."""
-
-    optimizer_type: Optional[str]
-    """The name of the optimizer used for weight updates."""
-
-    backend: str
-    """The specific FLOPpy backend utilized (e.g., 'pytorch', 'sklearn')."""
-
-    model_flop: int
-    """The total Floating Point Operations consumed by the model's structural layers."""
-
-    optimizer_flop: int
-    """The computational overhead (in FLOPs) introduced by the optimizer step."""
-
-    loss_forward_flop: int
-    """The FLOPs consumed during the loss function evaluation."""
-
-    loss_backward_flop: int
-    """The FLOPs consumed during the loss gradient computation."""
-
-    preproc_ops: int
-    """The operations workload for input preparation (e.g., tokenization steps)."""
-
-    overall_flop: int
-    """The total aggregated FLOPs across the entire tracked pipeline."""
-
-    export_path: Optional[str]
-    """The file system path where the CSV report is saved, if applicable."""
-
-    wandb_config: Optional[WandbConfiguration]
-    """The Weights & Biases configuration used for real-time logging."""
     
+    #: The custom name assigned to this tracking session.
+    run_name: Optional[str]
+    #: The structural class name of the monitored model (e.g., 'ResNet', 'RandomForest')
+    model_architecture: Optional[str]
+    #: The hardware device where the model is allocated (e.g., 'cpu', 'cuda:0').
+    model_device: Optional[str]
+    #: The name of the loss function used during training.
+    loss_type: Optional[str]
+    #: The name of the optimizer used for weight updates.
+    optimizer_type: Optional[str]
+    #: The specific FLOPpy backend utilized (e.g., 'pytorch', 'sklearn').
+    backend: str
+    #: The total Floating Point Operations consumed by the model's structural layers.
+    model_flop: int
+    #: The computational overhead (in FLOPs) introduced by the optimizer step.
+    optimizer_flop: int
+    #: The FLOPs consumed during the loss function evaluation.
+    loss_forward_flop: int
+    #: The FLOPs consumed during the loss gradient computation.
+    loss_backward_flop: int
+    #: The operations workload for input preparation (e.g., tokenization steps).
+    preproc_ops: int
+    #: The total aggregated FLOPs across the entire tracked pipeline.
+    overall_flop: int
+    #: The file system path where the CSV report is saved, if applicable.
+    export_path: Optional[str]
+    #: The Weights & Biases configuration used for real-time logging.
+    wandb_config: Optional[WandbConfiguration]
+    #: A snapshot of the execution environment's specifications.
     system: SystemInfo
-    """A snapshot of the execution environment's specifications."""
     
     def __str__(self):
         def format_flops(flops: int) -> str:
