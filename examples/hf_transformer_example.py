@@ -33,6 +33,7 @@ with torch.no_grad():
     outputs = model(**inputs)
 
 report = tracker.report()
+print(report)
 
 # ============================================================
 # MODE 2: context-manager style
@@ -57,3 +58,4 @@ with FLOPpyTracker(run_name="hf_transformer_test_with") as tracker:
     tracker.stop()
 
 report = tracker.report()
+print(report)
