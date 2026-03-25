@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 
 class BaseLogger(ABC):
     """
-    Minimal logger interface.
+    Minimal logger interface for FLOP/BOP summaries.
     """
 
     def log_batch(self, summary: dict):
@@ -16,7 +16,7 @@ class BaseLogger(ABC):
     @abstractmethod
     def log_summary(self, summary: dict):
         """
-        Receives the final FLOP summary and may return it.
+        Receives the final computational summary and may return it.
         """
         ...
 
