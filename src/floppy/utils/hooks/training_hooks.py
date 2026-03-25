@@ -27,53 +27,67 @@ class TorchTrainingHooks:
     def install(self, *, model, loss_fn=None, optimizer=None) -> None:
         try:
             self.handles.model_fwd_handle = model.register_forward_hook(self._hook_model_forward)
-
         except Exception:
-            cprint("[training_hooks] Warning: model forward hook registration failed. Model forward FLOP will not be counted.", Color.WARNING)
+            cprint(
+                "[training_hooks] Warning: model forward hook registration failed. Model forward FLOP/BOP will not be counted.",
+                Color.WARNING,
+            )
             self.handles.model_fwd_handle = None
 
         if loss_fn is not None:
             try:
                 self.handles.loss_fwd_pre_handle = loss_fn.register_forward_pre_hook(self._hook_loss_forward_pre)
-
             except Exception:
-                cprint("[training_hooks] Warning: loss forward pre-hook registration failed. Loss forward FLOP will not be counted.", Color.WARNING)
+                cprint(
+                    "[training_hooks] Warning: loss forward pre-hook registration failed. Loss forward FLOP/BOP will not be counted.",
+                    Color.WARNING,
+                )
                 self.handles.loss_fwd_pre_handle = None
 
             try:
                 self.handles.loss_fwd_post_handle = loss_fn.register_forward_hook(self._hook_loss_forward)
-
             except Exception:
-                cprint("[training_hooks] Warning: loss forward post-hook registration failed. Loss forward FLOP will not be counted.", Color.WARNING)
+                cprint(
+                    "[training_hooks] Warning: loss forward post-hook registration failed. Loss forward FLOP/BOP will not be counted.",
+                    Color.WARNING,
+                )
                 self.handles.loss_fwd_post_handle = None
 
             try:
                 self.handles.loss_bwd_pre_handle = loss_fn.register_full_backward_pre_hook(self._hook_loss_backward_pre)
-
             except Exception:
-                cprint("[training_hooks] Warning: loss backward pre-hook registration failed. Loss backward FLOP will not be counted.", Color.WARNING)
+                cprint(
+                    "[training_hooks] Warning: loss backward pre-hook registration failed. Loss backward FLOP/BOP will not be counted.",
+                    Color.WARNING,
+                )
                 self.handles.loss_bwd_pre_handle = None
 
             try:
                 self.handles.loss_bwd_post_handle = loss_fn.register_full_backward_hook(self._hook_loss_backward)
-
             except Exception:
-                cprint("[training_hooks] Warning: loss backward post-hook registration failed. Loss backward FLOP will not be counted.", Color.WARNING)
+                cprint(
+                    "[training_hooks] Warning: loss backward post-hook registration failed. Loss backward FLOP/BOP will not be counted.",
+                    Color.WARNING,
+                )
                 self.handles.loss_bwd_post_handle = None
 
         if optimizer is not None:
             try:
                 self.handles.opt_step_pre_handle = optimizer.register_step_pre_hook(self._hook_optimizer_step_pre)
-
             except Exception:
-                cprint("[training_hooks] Warning: optimizer step pre-hook registration failed. Optimizer FLOP will not be counted.", Color.WARNING)
+                cprint(
+                    "[training_hooks] Warning: optimizer step pre-hook registration failed. Optimizer FLOP/BOP will not be counted.",
+                    Color.WARNING,
+                )
                 self.handles.opt_step_pre_handle = None
 
             try:
                 self.handles.opt_step_post_handle = optimizer.register_step_post_hook(self._hook_optimizer_step_post)
-
             except Exception:
-                cprint("[training_hooks] Warning: optimizer step post-hook registration failed. Optimizer FLOP will not be counted.", Color.WARNING)
+                cprint(
+                    "[training_hooks] Warning: optimizer step post-hook registration failed. Optimizer FLOP/BOP will not be counted.",
+                    Color.WARNING,
+                )
                 self.handles.opt_step_post_handle = None
 
     def uninstall(self) -> None:
@@ -106,20 +120,27 @@ class TorchTrainingHooks:
     def _hook_loss_forward(self, module, inputs, output) -> None:
         self.loss_forward_calls += 1
         flop = 0
+        bop = 0
 
         try:
             if self._loss_forward_counter is not None and self._loss_forward_active:
                 self._loss_forward_counter.__exit__(None, None, None)
-                flop = int(self._loss_forward_counter.flops)
+                flop = int(getattr(self._loss_forward_counter, "flops", 0))
+                bop = int(getattr(self._loss_forward_counter, "bops", 0))
         except Exception:
             flop = 0
+            bop = 0
 
         self.tracker._loss_forward_flop += flop
+        self.tracker._loss_forward_bop += bop
         self._loss_forward_counter = None
         self._loss_forward_active = False
 
         if self.enable_debug_print:
-            print(f"[training_hooks] loss forward hook called | loss_forward_flop={flop}")
+            print(
+                f"[training_hooks] loss forward hook called | "
+                f"loss_forward_flop={flop} | loss_forward_bop={bop}"
+            )
 
     # ------------------------------------------------------------
     # LOSS BACKWARD
@@ -139,20 +160,27 @@ class TorchTrainingHooks:
         self.loss_backward_calls += 1
         self.tracker._last_backward_seen = True
         flop = 0
+        bop = 0
 
         try:
             if self._loss_backward_counter is not None and self._loss_backward_active:
                 self._loss_backward_counter.__exit__(None, None, None)
-                flop = int(self._loss_backward_counter.flops)
+                flop = int(getattr(self._loss_backward_counter, "flops", 0))
+                bop = int(getattr(self._loss_backward_counter, "bops", 0))
         except Exception:
             flop = 0
+            bop = 0
 
         self.tracker._loss_backward_flop += flop
+        self.tracker._loss_backward_bop += bop
         self._loss_backward_counter = None
         self._loss_backward_active = False
 
         if self.enable_debug_print:
-            print(f"[training_hooks] loss backward hook called | loss_backward_flop={flop}")
+            print(
+                f"[training_hooks] loss backward hook called | "
+                f"loss_backward_flop={flop} | loss_backward_bop={bop}"
+            )
 
     # ------------------------------------------------------------
     # OPTIMIZER
@@ -172,17 +200,24 @@ class TorchTrainingHooks:
         self.optimizer_step_calls += 1
         self.tracker._last_optimizer_step_seen = True
         flop = 0
+        bop = 0
 
         try:
             if self._optimizer_counter is not None and self._optimizer_active:
                 self._optimizer_counter.__exit__(None, None, None)
-                flop = int(self._optimizer_counter.flops)
+                flop = int(getattr(self._optimizer_counter, "flops", 0))
+                bop = int(getattr(self._optimizer_counter, "bops", 0))
         except Exception:
             flop = 0
+            bop = 0
 
         self.tracker._optimizer_flop += flop
+        self.tracker._optimizer_bop += bop
         self._optimizer_counter = None
         self._optimizer_active = False
 
         if self.enable_debug_print:
-            print(f"[training_hooks] optimizer step post hook called | optimizer_flop={flop}")
+            print(
+                f"[training_hooks] optimizer step post hook called | "
+                f"optimizer_flop={flop} | optimizer_bop={bop}"
+            )
