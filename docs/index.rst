@@ -8,8 +8,4 @@
    :caption: Contents:
    :hidden:
 
-   installation
-   quickstart
-   methodology
-   metrics
    api_reference
