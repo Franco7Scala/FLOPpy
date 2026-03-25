@@ -4,14 +4,14 @@
 [![Version](https://img.shields.io/badge/version-0.1.0-orange.svg)](#)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-**FLOPpy** is a Python library designed to estimate and monitor the computational workload of Machine Learning (ML) and Deep Learning (DL) models. By systematically counting **Floating Point Operations (FLOPs)**, the library enables a hardware-independent assessment of the algorithmic workload. Unlike metrics such as execution time or energy consumption, FLOPs reflect the intrinsic computational demand of an algorithm, ensuring comparability and reproducibility across different systems.
+**FLOPpy** is a Python library designed to estimate and monitor the computational workload of Machine Learning (ML) and Deep Learning (DL) models. By systematically counting **Floating Point Operations (FLOPs)** and **BOPs (Bit-OPerations)**, the library enables a hardware-independent assessment of the algorithmic workload. Unlike metrics such as execution time or energy consumption, FLOPs reflect the intrinsic computational demand of an algorithm, ensuring comparability and reproducibility across different systems.
 
 ---
 
 ## 🚀 Key Features
 
 * **Hardware-Agnostic Monitoring**: Provides a standardized measure of computational demand that does not depend on specific hardware characteristics or infrastructure;
-* **Broad Framework Support**: Offers a unified interface for models implemented in **PyTorch** (including also **Hugging Face** models) and **Scikit-learn**;
+* **Broad Framework Support**: Offers a unified interface for models implemented in **PyTorch** (including **Hugging Face** models) and **Scikit-learn**;
 * **Comprehensive Pipeline Tracking**: Beyond simple forward passes, it accounts for **backward passes**, **optimizer updates**, **loss evaluations**, **tokenizer operations** and so on;
 * **Modular Architecture**: Designed with a provider pattern and structural decoupling, allowing easy extension to other backends;
 * **Real-time Integration**: Supports seamless synchronization with **Weights & Biases (WandB)** for real-time visualization.
@@ -20,7 +20,7 @@
 
 ## 📦 Installation
 
-```bash
+```bash 
 pip install floppy-lib
 ```
 
@@ -45,7 +45,7 @@ Integration is transparent and does not require modifications to the model imple
 
 ```python
 import torch.nn as nn
-from floppy import FLOPpyTracker
+from floppy import FLOPpyTracker, WandbConfiguration
 from transformers import AutoModel
 
 
@@ -125,8 +125,11 @@ The `FLOPpyReport` object provides detailed statistics:
 * **`model_flops`**: The core algorithmic cost derived from the model's structural layers;
 * **`optimizer_flops`**: Computational overhead introduced by the optimization step, such as gradient updates and momentum calculations;
 * **`loss_flops`**: Operations related to the loss function computation;
+* **`model_bops`**: The precision-aware hardware computational effort of the model's architecture, calculated as Bit-Operations (BOPs) to reflect the underlying data types (e.g. INT8 vs. FP32);
+* **`optimizer_bops`**: The hardware-level computational cost of the optimization step, accounting for the specific bit-width used during gradient updates and weight adjustments;
+* **`loss_bops`**: The actual hardware effort required for the loss function evaluation, measured in Bit-Operations based on the tensor precision;
 * **`preproc_ops`**: Workload from input preparation, such as tokenizer operations for Large Language Models;
-* **`HardwareInfo`**: A detailed snapshot of the execution environment, including CPU/GPU specifications, RAM, and OS version.
+* **`SystemInfo`**: A detailed snapshot of the execution environment, including CPU/GPU specifications, RAM, and OS version.
 
 ---
 
@@ -136,7 +139,7 @@ The `FLOPpyReport` object provides detailed statistics:
 
 If you use FLOPpy in your research, please cite:
 
-> TODO after publication
+> Coming soon...
 
 ---
 
