@@ -11,9 +11,10 @@ from .utils.wandb_configuration import WandbConfiguration
 class Tracker(AbstractContextManager):
     """
     Tracker hook-only.
+
     Responsibilities:
     - Initialize backend and logger
-    - Activate FLOP count of the model by backend
+    - Activate FLOP/BOP count of the model by backend
     - Activate the training hook (loss/optimizer) by TorchTrainingHooks
     - Maintain the final global counters
     - Generate the final summary for loggers and reports
@@ -36,9 +37,16 @@ class Tracker(AbstractContextManager):
 
         # Aggregate counters
         self._preproc_ops: int = 0
+
+        # Loss FLOPs / BOPs
         self._loss_forward_flop: int = 0
+        self._loss_forward_bop: int = 0
         self._loss_backward_flop: int = 0
+        self._loss_backward_bop: int = 0
+
+        # Optimizer FLOPs / BOPs
         self._optimizer_flop: int = 0
+        self._optimizer_bop: int = 0
 
         # Training hooks
         self._hooks: Optional[TorchTrainingHooks] = None
@@ -71,7 +79,7 @@ class Tracker(AbstractContextManager):
         return False
 
     # ------------------------------------------------------------
-    # Final metrics
+    # Final metrics - model
     # ------------------------------------------------------------
 
     @property
@@ -79,20 +87,52 @@ class Tracker(AbstractContextManager):
         return int(self.backend.get_total_flop())
 
     @property
+    def total_model_bop(self) -> int:
+        return int(self.backend.get_total_bop())
+
+    # ------------------------------------------------------------
+    # Final metrics - preprocessing
+    # ------------------------------------------------------------
+
+    @property
     def total_preproc_ops(self) -> int:
         return int(self._preproc_ops)
+
+    # ------------------------------------------------------------
+    # Final metrics - loss
+    # ------------------------------------------------------------
 
     @property
     def total_loss_forward_flop(self) -> int:
         return int(self._loss_forward_flop)
 
     @property
+    def total_loss_forward_bop(self) -> int:
+        return int(self._loss_forward_bop)
+
+    @property
     def total_loss_backward_flop(self) -> int:
         return int(self._loss_backward_flop)
 
     @property
+    def total_loss_backward_bop(self) -> int:
+        return int(self._loss_backward_bop)
+
+    # ------------------------------------------------------------
+    # Final metrics - optimizer
+    # ------------------------------------------------------------
+
+    @property
     def total_optimizer_flop(self) -> int:
         return int(self._optimizer_flop)
+
+    @property
+    def total_optimizer_bop(self) -> int:
+        return int(self._optimizer_bop)
+
+    # ------------------------------------------------------------
+    # Final totals
+    # ------------------------------------------------------------
 
     @property
     def total_overall_flop(self) -> int:
@@ -101,6 +141,15 @@ class Tracker(AbstractContextManager):
             + self.total_loss_forward_flop
             + self.total_loss_backward_flop
             + self.total_optimizer_flop
+        )
+
+    @property
+    def total_overall_bop(self) -> int:
+        return (
+            self.total_model_bop
+            + self.total_loss_forward_bop
+            + self.total_loss_backward_bop
+            + self.total_optimizer_bop
         )
 
     # ------------------------------------------------------------
@@ -129,8 +178,8 @@ class Tracker(AbstractContextManager):
         Installs PyTorch hooks for loss and optimizer.
 
         Note:
-        - Model FLOPs are counted by the backend.
-        - Loss and optimizer FLOPs are counted dynamically by TorchTrainingHooks via UniversalFlopCounter.
+        - Model FLOPs/BOPs are counted by the backend.
+        - Loss and optimizer FLOPs/BOPs are counted dynamically by TorchTrainingHooks.
         """
         if self._hooks is not None:
             self._hooks.uninstall()
@@ -144,22 +193,33 @@ class Tracker(AbstractContextManager):
     def build_summary_dict(self) -> Dict[str, int]:
         return {
             "total_model_flop": self.total_model_flop,
+            "total_model_bop": self.total_model_bop,
             "total_optimizer_flop": self.total_optimizer_flop,
+            "total_optimizer_bop": self.total_optimizer_bop,
             "total_loss_forward_flop": self.total_loss_forward_flop,
+            "total_loss_forward_bop": self.total_loss_forward_bop,
             "total_loss_backward_flop": self.total_loss_backward_flop,
+            "total_loss_backward_bop": self.total_loss_backward_bop,
+            "total_preproc_ops": self.total_preproc_ops,
             "total_overall_flop": self.total_overall_flop,
+            "total_overall_bop": self.total_overall_bop,
         }
 
     def build_progress_dict(self) -> Dict[str, int]:
         """
-        Returns the current accumulated FLOP snapshot.
+        Returns the current accumulated FLOP/BOP snapshot.
         Used for intermediate batch/epoch logging.
         """
         return {
             "total_model_flop": self.total_model_flop,
+            "total_model_bop": self.total_model_bop,
             "total_optimizer_flop": self.total_optimizer_flop,
+            "total_optimizer_bop": self.total_optimizer_bop,
             "total_loss_forward_flop": self.total_loss_forward_flop,
+            "total_loss_forward_bop": self.total_loss_forward_bop,
             "total_loss_backward_flop": self.total_loss_backward_flop,
+            "total_loss_backward_bop": self.total_loss_backward_bop,
             "total_preproc_ops": self.total_preproc_ops,
             "total_overall_flop": self.total_overall_flop,
+            "total_overall_bop": self.total_overall_bop,
         }
