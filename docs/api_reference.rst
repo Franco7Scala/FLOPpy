@@ -21,3 +21,10 @@ Reporting and Metrics
 .. autoclass:: floppy.utils.system_info.SystemInfo
    :members:
    :undoc-members:
+
+Configuration
+-------------
+
+.. autoclass:: floppy.utils.wandb_configuration.WandbConfiguration
+   :members:
+   :undoc-members:
