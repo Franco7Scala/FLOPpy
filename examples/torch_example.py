@@ -60,6 +60,7 @@ for _ in range(num_epochs):
     tracker.epoch()
 
 report = tracker.report()
+print(report)
 
 # ============================================================
 # MODE 2: context-manager style
@@ -99,3 +100,4 @@ with FLOPpyTracker(run_name="torch_test_mode2") as tracker:
     tracker.stop()
 
 report = tracker.report()
+print(report)
