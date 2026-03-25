@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
-from floppy import FLOPpyTracker
-from floppy.utils.wandb_configuration import WandbConfiguration
+from floppy import FLOPpyTracker, WandbConfiguration
 
 
 # Set device and seed for reproducibility
@@ -36,7 +35,7 @@ wandb_config = WandbConfiguration(
     project_name="torch_test",
     group_name="eDPO",
     reporter_key="your_wandb_key_here",
-)s
+)
 
 # ==========================================
 # FLOPpy INTEGRATION (CONTEXT MANAGER)
