@@ -27,7 +27,6 @@ model.fit(X_train, y_train)
 preds = model.predict(X_test)
 
 report = tracker.report()
-print_report_metrics(report)
 
 # ============================================================
 # MODE 2: context manager style
@@ -44,4 +43,3 @@ with FLOPpyTracker(run_name="sklearn_test_with") as tracker:
     tracker.stop()
 
 report = tracker.report()
-print_report_metrics(report)
