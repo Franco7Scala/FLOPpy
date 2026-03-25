@@ -3,10 +3,6 @@ from sklearn.datasets import make_classification
 from sklearn.ensemble import RandomForestClassifier
 from floppy import FLOPpyTracker
 
-# ------------------------------------------------------------
-# Shared setup
-# ------------------------------------------------------------
-
 X, y = make_classification(
     n_samples=300,
     n_features=20,
@@ -24,17 +20,14 @@ X_test, y_test = X[200:], y[200:]
 
 model = RandomForestClassifier(n_estimators=100)
 
-tracker = FLOPpyTracker(
-    run_name="sklearn_test",
-)
-
+tracker = FLOPpyTracker(run_name="sklearn_test")
 tracker.run(model=model)
 
 model.fit(X_train, y_train)
 preds = model.predict(X_test)
 
 report = tracker.report()
-print(report)
+print_report_metrics(report)
 
 # ============================================================
 # MODE 2: context manager style
@@ -42,10 +35,7 @@ print(report)
 
 model = RandomForestClassifier(n_estimators=100)
 
-with FLOPpyTracker(
-    run_name="sklearn_test_with",
-) as tracker:
-
+with FLOPpyTracker(run_name="sklearn_test_with") as tracker:
     tracker.start(model=model)
 
     model.fit(X_train, y_train)
@@ -54,4 +44,4 @@ with FLOPpyTracker(
     tracker.stop()
 
 report = tracker.report()
-print(report)
+print_report_metrics(report)
