@@ -136,6 +136,7 @@ class SklearnBackend(BaseBackend):
         value_flop = int(flop)
         value_bop = int(bop)
         self._last_batch_flop = value_flop
+        self._last_batch_bop = value_bop
         self.total_flop += value_flop
         self.total_bop += value_bop
 
