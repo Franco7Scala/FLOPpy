@@ -73,6 +73,7 @@ class FLOPpyTracker:
         """
         if self._wrapped_tokenizer is None:
             raise RuntimeError("No wrapped tokenizer available. Pass tokenizer=... to start(...) or run(...).")
+
         return self._wrapped_tokenizer
 
     # ------------------------------------------------------------
@@ -297,6 +298,7 @@ class FLOPpyTracker:
                 try:
                     param_device = next(self._model.parameters()).device
                     model_device = str(param_device).upper()
+
                 except Exception:
                     model_device = "Unknown"
 

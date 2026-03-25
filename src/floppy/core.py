@@ -28,11 +28,7 @@ class Tracker(AbstractContextManager):
         wandb_config: Optional[WandbConfiguration] = None,
         run_name: Optional[str] = None,
     ):
-        self.logger = create_logger(
-            export_path=export_path,
-            wandb_config=wandb_config,
-            run_name=run_name,
-        )
+        self.logger = create_logger(export_path=export_path, wandb_config=wandb_config, run_name=run_name)
         self.backend = create_backend(model, backend, logger=self.logger)
 
         # Aggregate counters

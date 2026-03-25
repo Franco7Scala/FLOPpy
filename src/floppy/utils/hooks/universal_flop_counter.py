@@ -65,7 +65,6 @@ class UniversalFlopCounter(TorchDispatchMode):
         flop_value = int(flop_count)
         bit_width = self._get_effective_bit_width(ref_obj)
         bop_value = int(flop_value * bit_width)
-
         self.flops += flop_value
         self.bops += bop_value
 
