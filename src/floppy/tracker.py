@@ -279,8 +279,16 @@ class FLOPpyTracker:
         loss_backward_flop = int(getattr(tracker_obj, "total_loss_backward_flop", 0))
         preproc_ops = int(getattr(tracker_obj, "total_preproc_ops", 0))
         overall_flop = int(getattr(tracker_obj, "total_overall_flop", 0))
+
+        model_bop = int(getattr(tracker_obj, "total_model_bop", 0))
+        optimizer_bop = int(getattr(tracker_obj, "total_optimizer_bop", 0))
+        loss_forward_bop = int(getattr(tracker_obj, "total_loss_forward_bop", 0))
+        loss_backward_bop = int(getattr(tracker_obj, "total_loss_backward_bop", 0))
+        overall_bop = int(getattr(tracker_obj, "total_overall_bop", 0))
+
         model_architecture = "unknown"
         model_device = "CPU"
+
         if self._model is not None:
             model_cls = self._model.__class__
             model_architecture = f"{model_cls.__module__}.{model_cls.__name__}"
@@ -289,7 +297,6 @@ class FLOPpyTracker:
                 try:
                     param_device = next(self._model.parameters()).device
                     model_device = str(param_device).upper()
-
                 except Exception:
                     model_device = "Unknown"
 
@@ -306,6 +313,11 @@ class FLOPpyTracker:
             loss_backward_flop=loss_backward_flop,
             preproc_ops=preproc_ops,
             overall_flop=overall_flop,
+            model_bop=model_bop,
+            optimizer_bop=optimizer_bop,
+            loss_forward_bop=loss_forward_bop,
+            loss_backward_bop=loss_backward_bop,
+            overall_bop=overall_bop,
             export_path=self._export_path,
             wandb_config=self._wandb_config,
             system=self._hardware
