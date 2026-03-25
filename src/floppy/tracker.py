@@ -11,7 +11,7 @@ from .utils.wandb_configuration import WandbConfiguration
 
 class FLOPpyTracker:
     """
-    Tracker for monitoring FLOPs in machine learning and deep learning models.
+    Tracker for monitoring FLOPs and BOPs in machine learning and deep learning models.
     for models, optimizers, loss functions and tokenizers during training or inference.
     It supports integration with Weights & Biases for logging and can export reports.
 
@@ -195,7 +195,7 @@ class FLOPpyTracker:
 
     def batch(self) -> dict:
         """
-        Log and returns the current FLOP counters as a batch snapshot.
+        Log and returns the current FLOP/BOP counters as a batch snapshot.
         Each call increments the internal batch counter by 1.
         """
         if not self._is_active or self._tracker is None:
@@ -210,7 +210,7 @@ class FLOPpyTracker:
 
     def epoch(self) -> dict:
         """
-        Log and returns the current FLOP counters as an epoch snapshot.
+        Log and returns the current FLOP/BOP counters as an epoch snapshot.
         Each call increments the internal epoch counter by 1.
         """
         if not self._is_active or self._tracker is None:
