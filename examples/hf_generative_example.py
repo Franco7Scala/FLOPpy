@@ -2,16 +2,13 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from floppy import FLOPpyTracker
 
-# ------------------------------------------------------------
-# Shared setup
-# ------------------------------------------------------------
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 model_name = "distilgpt2"
 prompt = "The future of artificial intelligence"
 
 base_tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-# GPT-2 often needs an explicit pad token for safer generation
 if base_tokenizer.pad_token is None:
     base_tokenizer.pad_token = base_tokenizer.eos_token
 
@@ -19,19 +16,17 @@ if base_tokenizer.pad_token is None:
 # MODE 1
 # ============================================================
 
-model = AutoModelForCausalLM.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
 model.config.pad_token_id = base_tokenizer.pad_token_id
 
-tracker = FLOPpyTracker(
-    run_name="hf_generate_test",
-)
-
+tracker = FLOPpyTracker(run_name="hf_generate_test")
 tracker.run(model=model, tokenizer=base_tokenizer)
 
 inputs = tracker.tokenizer(
     prompt,
     return_tensors="pt",
 )
+inputs = {k: v.to(device) for k, v in inputs.items()}
 
 with torch.no_grad():
     generated = model.generate(
@@ -41,25 +36,23 @@ with torch.no_grad():
     )
 
 report = tracker.report()
-print(report)
+print_report_metrics(report)
 
 # ============================================================
 # MODE 2: context-manager style
 # ============================================================
 
-model = AutoModelForCausalLM.from_pretrained(model_name)
+model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
 model.config.pad_token_id = base_tokenizer.pad_token_id
 
-with FLOPpyTracker(
-    run_name="hf_generate_test_with",
-) as tracker:
-
+with FLOPpyTracker(run_name="hf_generate_test_with") as tracker:
     tracker.start(model=model, tokenizer=base_tokenizer)
 
     inputs = tracker.tokenizer(
         prompt,
         return_tensors="pt",
     )
+    inputs = {k: v.to(device) for k, v in inputs.items()}
 
     with torch.no_grad():
         generated = model.generate(
@@ -71,4 +64,4 @@ with FLOPpyTracker(
     tracker.stop()
 
 report = tracker.report()
-print(report)
+print_report_metrics(report)
