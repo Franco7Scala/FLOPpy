@@ -2,10 +2,11 @@ from __future__ import annotations
 from typing import Optional
 from .hook_handles import HookHandles
 from .universal_flop_counter import UniversalFlopCounter
-from ..utility import Color, cprint
+from ....utils.utility import Color, cprint
 
 
 class TorchTrainingHooks:
+
     def __init__(self, tracker, *, enable_debug_print: bool = False):
         self.tracker = tracker
         self.enable_debug_print = enable_debug_print
@@ -15,10 +16,8 @@ class TorchTrainingHooks:
         self.loss_backward_calls = 0
         self.optimizer_step_calls = 0
         self._loss_forward_counter: Optional[UniversalFlopCounter] = None
-        self._loss_backward_counter: Optional[UniversalFlopCounter] = None
         self._optimizer_counter: Optional[UniversalFlopCounter] = None
         self._loss_forward_active = False
-        self._loss_backward_active = False
         self._optimizer_active = False
 
     # ------------------------------------------------------------
@@ -45,20 +44,6 @@ class TorchTrainingHooks:
             except Exception:
                 cprint("[training_hooks] Warning: loss forward post-hook registration failed. Loss forward FLOP/BOP will not be counted.", Color.WARNING)
                 self.handles.loss_fwd_post_handle = None
-
-            try:
-                self.handles.loss_bwd_pre_handle = loss_fn.register_full_backward_pre_hook(self._hook_loss_backward_pre)
-
-            except Exception:
-                cprint("[training_hooks] Warning: loss backward pre-hook registration failed. Loss backward FLOP/BOP will not be counted.", Color.WARNING)
-                self.handles.loss_bwd_pre_handle = None
-
-            try:
-                self.handles.loss_bwd_post_handle = loss_fn.register_full_backward_hook(self._hook_loss_backward)
-
-            except Exception:
-                cprint("[training_hooks] Warning: loss backward post-hook registration failed. Loss backward FLOP/BOP will not be counted.", Color.WARNING)
-                self.handles.loss_bwd_post_handle = None
 
         if optimizer is not None:
             try:
@@ -124,42 +109,6 @@ class TorchTrainingHooks:
             print(f"[training_hooks] loss forward hook called | loss_forward_flop={flop} | loss_forward_bop={bop}")
 
     # ------------------------------------------------------------
-    # LOSS BACKWARD
-    # ------------------------------------------------------------
-    def _hook_loss_backward_pre(self, module, grad_output) -> None:
-        self._loss_backward_counter = UniversalFlopCounter()
-        self._loss_backward_active = False
-        try:
-            self._loss_backward_counter.__enter__()
-            self._loss_backward_active = True
-
-        except Exception:
-            self._loss_backward_counter = None
-            self._loss_backward_active = False
-
-    def _hook_loss_backward(self, module, grad_input, grad_output) -> None:
-        self.loss_backward_calls += 1
-        self.tracker._last_backward_seen = True
-        flop = 0
-        bop = 0
-        try:
-            if self._loss_backward_counter is not None and self._loss_backward_active:
-                self._loss_backward_counter.__exit__(None, None, None)
-                flop = int(getattr(self._loss_backward_counter, "flops", 0))
-                bop = int(getattr(self._loss_backward_counter, "bops", 0))
-
-        except Exception:
-            flop = 0
-            bop = 0
-
-        self.tracker._loss_backward_flop += flop
-        self.tracker._loss_backward_bop += bop
-        self._loss_backward_counter = None
-        self._loss_backward_active = False
-        if self.enable_debug_print:
-            print(f"[training_hooks] loss backward hook called | loss_backward_flop={flop} | loss_backward_bop={bop}")
-
-    # ------------------------------------------------------------
     # OPTIMIZER
     # ------------------------------------------------------------
     def _hook_optimizer_step_pre(self, optimizer, args, kwargs) -> None:
@@ -178,6 +127,7 @@ class TorchTrainingHooks:
         self.tracker._last_optimizer_step_seen = True
         flop = 0
         bop = 0
+        # 1. Try to get FLOPs from the standard ATen Dispatcher
         try:
             if self._optimizer_counter is not None and self._optimizer_active:
                 self._optimizer_counter.__exit__(None, None, None)
@@ -188,6 +138,39 @@ class TorchTrainingHooks:
             flop = 0
             bop = 0
 
+        # ------------------------------------------------------------
+        # 2. ESCAPE HATCH FOR CUSTOM / FUSED OPTIMIZERS
+        # ------------------------------------------------------------
+        # If the dispatcher missed the operations (flop == 0), check if it's a known C++/CUDA custom optimizer
+        if flop == 0:
+            opt_name = optimizer.__class__.__name__
+            # List of the most common fused/quantized optimizers that bypass PyTorch standard ops
+            custom_optimizers = [
+                "Adam8bit", "AdamW8bit", "PagedAdam8bit", "PagedAdamW8bit",  # BitsAndBytes (QLoRA)
+                "FusedAdam", "FusedAdamW", "FusedSGD",  # NVIDIA Apex / Megatron
+                "DeepSpeedCPUAdam", "DeepSpeedZeroOptimizer",  # DeepSpeed
+                "Lion8bit", "PagedLion8bit"  # Emerging custom optimizers
+            ]
+            # If the current optimizer matches any of the custom names
+            if any(known_opt in opt_name for known_opt in custom_optimizers):
+                # A. Count the total number of trainable parameters handled by this optimizer
+                num_params = sum(
+                    p.numel()
+                    for group in optimizer.param_groups
+                    for p in group['params']
+                    if p.requires_grad
+                )
+                # B. Algorithmic FLOP estimation per parameter
+                # Adam variants do ~10 FLOPs per param (momentum, variance, bias correction, weight update)
+                # SGD variants do ~5 FLOPs per param (velocity, weight update)
+                ops_per_param = 5 if "SGD" in opt_name else 10
+                flop = num_params * ops_per_param
+                # C. BOPs estimation based on the optimizer's bit-width storage
+                # If "8bit" is in the name, it stores states in INT8, otherwise assume standard FP16/BF16
+                bit_width = 8 if "8bit" in opt_name.lower() else 16
+                bop = flop * bit_width
+
+        # 3. Update the global tracker states
         self.tracker._optimizer_flop += flop
         self.tracker._optimizer_bop += bop
         self._optimizer_counter = None

@@ -23,10 +23,14 @@ class FLOPpyReport:
     optimizer_type: Optional[str]
     #: The specific FLOPpy backend utilized (e.g., 'pytorch', 'sklearn').
     backend: str
-    #: The total Floating Point Operations consumed by the model's structural layers.
-    model_flop: int
-    #: The total Bit-Operations consumed by the model's structural layers.
-    model_bop: int
+    #: The total Floating Point Operations consumed by the model's structural layers (in forward).
+    model_forward_flop: int
+    #: The total Floating Point Operations consumed by the model's structural layers (in backward).
+    model_backward_flop: int
+    #: The total Bit-Operations consumed by the model's structural layers (in forward).
+    model_forward_bop: int
+    #: The total Bit-Operations consumed by the model's structural layers (in backward).
+    model_backward_bop: int
     #: The computational overhead (in FLOPs) introduced by the optimizer step.
     optimizer_flop: int
     #: The computational overhead (in BOPs) introduced by the optimizer step.
@@ -121,7 +125,10 @@ class FLOPpyReport:
 
         # Computational Workload Breakdown
         result += "Computational Workload Breakdown:\n"
-        result += f"  - Model (Forward)         : {format_both(self.model_flop, self.model_bop)}\n"
+        result += f"  - Model (Forward)         : {format_both(self.model_forward_flop, self.model_forward_bop)}\n"
+
+        if self.model_backward_flop > 0 or self.model_backward_bop > 0:
+            result += f"  - Model (Backward)        : {format_both(self.model_backward_flop, self.model_backward_bop)}\n"
 
         if self.loss_forward_flop > 0 or self.loss_forward_bop > 0:
             result += f"  - Loss (Forward)          : {format_both(self.loss_forward_flop, self.loss_forward_bop)}\n"

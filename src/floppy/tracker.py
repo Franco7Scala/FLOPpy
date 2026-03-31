@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any, Optional
 from torch.optim import Optimizer
 from .core import Tracker
-from .backends.sklearn_backend import SklearnBackend
+from .backends.sklearn.sklearn_backend import SklearnBackend
 from .utils.floppy_report import FLOPpyReport
 from .utils.system_info import get_system_info, SystemInfo
 from .utils.tokenizer_ops import TokenizerWithOps
@@ -274,14 +274,16 @@ class FLOPpyTracker:
         if tracker_obj is None:
             return
 
-        model_flop = int(getattr(tracker_obj, "total_model_flop", 0))
+        model_forward_flop = int(getattr(tracker_obj, "total_model_forward_flop", 0))
+        model_backward_flop = int(getattr(tracker_obj, "total_model_backward_flop", 0))
         optimizer_flop = int(getattr(tracker_obj, "total_optimizer_flop", 0))
         loss_forward_flop = int(getattr(tracker_obj, "total_loss_forward_flop", 0))
         loss_backward_flop = int(getattr(tracker_obj, "total_loss_backward_flop", 0))
         preproc_ops = int(getattr(tracker_obj, "total_preproc_ops", 0))
         overall_flop = int(getattr(tracker_obj, "total_overall_flop", 0))
 
-        model_bop = int(getattr(tracker_obj, "total_model_bop", 0))
+        model_forward_bop = int(getattr(tracker_obj, "total_model_forward_bop", 0))
+        model_backward_bop = int(getattr(tracker_obj, "total_model_backward_bop", 0))
         optimizer_bop = int(getattr(tracker_obj, "total_optimizer_bop", 0))
         loss_forward_bop = int(getattr(tracker_obj, "total_loss_forward_bop", 0))
         loss_backward_bop = int(getattr(tracker_obj, "total_loss_backward_bop", 0))
@@ -309,13 +311,15 @@ class FLOPpyTracker:
             loss_type=f"{getattr(self._loss_fn, '__name__', self._loss_fn.__class__.__name__)}" if self._loss_fn is not None else None,
             optimizer_type=f"{getattr(self._optimizer, '__name__', self._optimizer.__class__.__name__)}" if self._optimizer is not None else None,
             model_device=model_device,
-            model_flop=model_flop,
+            model_forward_flop=model_forward_flop,
+            model_forward_bop=model_forward_bop,
+            model_backward_flop=model_backward_flop,
+            model_backward_bop=model_backward_bop,
             optimizer_flop=optimizer_flop,
             loss_forward_flop=loss_forward_flop,
             loss_backward_flop=loss_backward_flop,
             preproc_ops=preproc_ops,
             overall_flop=overall_flop,
-            model_bop=model_bop,
             optimizer_bop=optimizer_bop,
             loss_forward_bop=loss_forward_bop,
             loss_backward_bop=loss_backward_bop,

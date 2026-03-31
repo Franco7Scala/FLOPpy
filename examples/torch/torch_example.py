@@ -27,7 +27,6 @@ model = nn.Sequential(
     nn.ReLU(),
     nn.Linear(16, 3),
 ).to(device)
-
 loss_fn = nn.CrossEntropyLoss()
 
 # Define the optimizer.
@@ -41,7 +40,7 @@ wandb_config = WandbConfiguration(
     group_name="eDPO",
     reporter_key="your_wandb_key_here",
 )
-
+wandb_config = None
 # ==========================================
 # FLOPpy INTEGRATION
 # ==========================================

@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Callable, Optional
-from .base import BaseBackend
+from floppy.backends.base import BaseBackend
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, LogisticRegression, SGDClassifier, SGDRegressor
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
@@ -12,14 +12,17 @@ from sklearn.decomposition import PCA
 
 import numpy as np
 
+from floppy.utils.utility import cprint, Color
+
 
 class SklearnBackend(BaseBackend):
     """
     Backend for scikit-learn models.
 
     Responsibilities:
-    - wraps sklearn methods (fit, predict, predict_proba, transform)
-    - estimates model FLOPs
+    - Wraps sklearn methods (fit, predict, predict_proba, transform)
+    - Estimates model FLOPs using algorithmic complexity heuristics
+    - Maps 'fit' to Backward (Training) and 'predict/transform' to Forward (Inference)
     """
 
     def __init__(self, model, logger=None):
@@ -64,65 +67,75 @@ class SklearnBackend(BaseBackend):
             self.model.transform = self._orig_transform
 
     # ------------------------------------------------------------
-    # Wrapped methods
+    # Wrapped methods (with Fail-Safe Try/Except)
     # ------------------------------------------------------------
 
     def _wrap_fit(self, fn: Callable) -> Callable:
         def wrapped(X, y=None, *args, **kwargs):
             result = fn(X, y, *args, **kwargs)
-            x_arr = np.asarray(X)
-            flop = self._estimate_fit_flop(x_arr, y)
+            try:
+                x_arr = np.asarray(X)
+                flop = self._estimate_fit_flop(x_arr, y)
+                bit_width = self._get_numpy_bit_width(x_arr)
+                bops = int(flop * bit_width)
+                # 'fit' is equivalent to training, so we map it to Backward metrics
+                self._accumulate_call(flop, bops, is_training=True)
 
-            # Calculate BOPs based on input data precision
-            bit_width = self._get_numpy_bit_width(x_arr)
-            bops = int(flop * bit_width)
+            except Exception as e:
+                cprint(f"FLOPpy Warning: Failed to estimate fit FLOPs - {e}", Color.WARNING)
 
-            self._accumulate_call(flop, bops)
             return result
 
         return wrapped
 
     def _wrap_predict(self, fn: Callable) -> Callable:
         def wrapped(X, *args, **kwargs):
-            x_arr = np.asarray(X)
             y_pred = fn(X, *args, **kwargs)
-            flop = self._estimate_predict_flop(x_arr, np.asarray(y_pred))
+            try:
+                x_arr = np.asarray(X)
+                flop = self._estimate_predict_flop(x_arr, np.asarray(y_pred))
+                bit_width = self._get_numpy_bit_width(x_arr)
+                bops = int(flop * bit_width)
+                # 'predict' is inference, so we map it to Forward metrics
+                self._accumulate_call(flop, bops, is_training=False)
 
-            # Calculate BOPs based on input data precision
-            bit_width = self._get_numpy_bit_width(x_arr)
-            bops = int(flop * bit_width)
+            except Exception as e:
+                pass
 
-            self._accumulate_call(flop, bops)
             return y_pred
 
         return wrapped
 
     def _wrap_predict_proba(self, fn: Callable) -> Callable:
         def wrapped(X, *args, **kwargs):
-            x_arr = np.asarray(X)
             proba = fn(X, *args, **kwargs)
-            flop = self._estimate_predict_flop(x_arr, np.asarray(proba))
+            try:
+                x_arr = np.asarray(X)
+                flop = self._estimate_predict_flop(x_arr, np.asarray(proba))
+                bit_width = self._get_numpy_bit_width(x_arr)
+                bops = int(flop * bit_width)
+                self._accumulate_call(flop, bops, is_training=False)
 
-            # Calculate BOPs based on input data precision
-            bit_width = self._get_numpy_bit_width(x_arr)
-            bops = int(flop * bit_width)
+            except Exception as e:
+                pass
 
-            self._accumulate_call(flop, bops)
             return proba
 
         return wrapped
 
     def _wrap_transform(self, fn: Callable) -> Callable:
         def wrapped(X, *args, **kwargs):
-            x_arr = np.asarray(X)
             z = fn(X, *args, **kwargs)
-            flop = self._estimate_transform_flop(x_arr, np.asarray(z))
+            try:
+                x_arr = np.asarray(X)
+                flop = self._estimate_transform_flop(x_arr, np.asarray(z))
+                bit_width = self._get_numpy_bit_width(x_arr)
+                bops = int(flop * bit_width)
+                self._accumulate_call(flop, bops, is_training=False)
 
-            # Calculate BOPs based on input data precision
-            bit_width = self._get_numpy_bit_width(x_arr)
-            bops = int(flop * bit_width)
+            except Exception as e:
+                pass
 
-            self._accumulate_call(flop, bops)
             return z
 
         return wrapped
@@ -131,21 +144,23 @@ class SklearnBackend(BaseBackend):
     # FLOP accumulation
     # ------------------------------------------------------------
 
-    def _accumulate_call(self, flop: int, bop: int):
+    def _accumulate_call(self, flop: int, bop: int, is_training: bool = False):
         self._batch_idx += 1
         value_flop = int(flop)
         value_bop = int(bop)
-        self._last_batch_flop = value_flop
-        self._last_batch_bop = value_bop
-        self.total_flop += value_flop
-        self.total_bop += value_bop
+        if is_training:
+            self._last_batch_backward_flop = value_flop
+            self._last_batch_backward_bop = value_bop
+            self.total_backward_flop += value_flop
+            self.total_backward_bop += value_bop
+
+        else:
+            self._last_batch_flop = value_flop
+            self._last_batch_bop = value_bop
+            self.total_forward_flop += value_flop
+            self.total_forward_bop += value_bop
 
     def _get_numpy_bit_width(self, x_arr: np.ndarray) -> int:
-        """
-        Determines the bit-width of the NumPy array used for computation.
-        Scikit-learn predominantly uses float64 internally, but tracking the
-        input dtype provides a baseline for hardware effort estimation.
-        """
         if x_arr is None or not hasattr(x_arr, "dtype"):
             return 64  # sklearn defaults to float64
 
@@ -162,7 +177,7 @@ class SklearnBackend(BaseBackend):
         elif dtype in (np.int8, np.uint8):
             return 8
 
-        return 64  # Default fallback
+        return 64
 
     # ------------------------------------------------------------
     # Iteration helpers
@@ -184,7 +199,7 @@ class SklearnBackend(BaseBackend):
         2. post-fit t_ (mainly for SGD)
         3. dynamic fallback based on dataset size
         """
-        # 1) Real post-fit iteration count 
+        # 1) Real post-fit iteration count
         iters = getattr(model, "n_iter_", None)
         if iters is not None:
             if isinstance(iters, (list, tuple, np.ndarray)):

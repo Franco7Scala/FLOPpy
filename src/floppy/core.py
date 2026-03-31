@@ -3,7 +3,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Dict, Optional
 from .backends import create_backend
 from .logging import create_logger
-from .utils.hooks.training_hooks import TorchTrainingHooks
+from .backends.torch.hooks.training_hooks import TorchTrainingHooks
 from .utils.tokenizer_ops import wrap_tokenizer
 from .utils.wandb_configuration import WandbConfiguration
 
@@ -79,12 +79,20 @@ class Tracker(AbstractContextManager):
     # ------------------------------------------------------------
 
     @property
-    def total_model_flop(self) -> int:
-        return int(self.backend.get_total_flop())
+    def total_model_forward_flop(self) -> int:
+        return int(self.backend.get_total_forward_flop())
 
     @property
-    def total_model_bop(self) -> int:
-        return int(self.backend.get_total_bop())
+    def total_model_forward_bop(self) -> int:
+        return int(self.backend.get_total_forward_bop())
+
+    @property
+    def total_model_backward_flop(self) -> int:
+        return int(self.backend.get_total_backward_flop())
+
+    @property
+    def total_model_backward_bop(self) -> int:
+        return int(self.backend.get_total_backward_bop())
 
     # ------------------------------------------------------------
     # Final metrics - preprocessing
@@ -133,19 +141,21 @@ class Tracker(AbstractContextManager):
     @property
     def total_overall_flop(self) -> int:
         return (
-            self.total_model_flop
-            + self.total_loss_forward_flop
-            + self.total_loss_backward_flop
-            + self.total_optimizer_flop
+                self.total_model_forward_flop
+                + self.total_model_backward_flop
+                + self.total_loss_forward_flop
+                + self.total_loss_backward_flop
+                + self.total_optimizer_flop
         )
 
     @property
     def total_overall_bop(self) -> int:
         return (
-            self.total_model_bop
-            + self.total_loss_forward_bop
-            + self.total_loss_backward_bop
-            + self.total_optimizer_bop
+                self.total_model_forward_bop
+                + self.total_model_backward_bop
+                + self.total_loss_forward_bop
+                + self.total_loss_backward_bop
+                + self.total_optimizer_bop
         )
 
     # ------------------------------------------------------------
@@ -188,8 +198,10 @@ class Tracker(AbstractContextManager):
     # ------------------------------------------------------------
     def build_summary_dict(self) -> Dict[str, int]:
         return {
-            "total_model_flop": self.total_model_flop,
-            "total_model_bop": self.total_model_bop,
+            "total_model_forward_flop": self.total_model_forward_flop,
+            "total_model_forward_bop": self.total_model_forward_bop,
+            "total_model_backward_flop": self.total_model_backward_flop,
+            "total_model_backward_bop": self.total_model_backward_bop,
             "total_optimizer_flop": self.total_optimizer_flop,
             "total_optimizer_bop": self.total_optimizer_bop,
             "total_loss_forward_flop": self.total_loss_forward_flop,
@@ -207,8 +219,10 @@ class Tracker(AbstractContextManager):
         Used for intermediate batch/epoch logging.
         """
         return {
-            "total_model_flop": self.total_model_flop,
-            "total_model_bop": self.total_model_bop,
+            "total_model_forward_flop": self.total_model_forward_flop,
+            "total_model_forward_bop": self.total_model_forward_bop,
+            "total_model_backward_flop": self.total_model_backward_flop,
+            "total_model_backward_bop": self.total_model_backward_bop,
             "total_optimizer_flop": self.total_optimizer_flop,
             "total_optimizer_bop": self.total_optimizer_bop,
             "total_loss_forward_flop": self.total_loss_forward_flop,

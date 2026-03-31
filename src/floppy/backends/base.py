@@ -8,21 +8,22 @@ class BaseBackend(ABC):
 
     Responsibilities:
     - attach / detach framework-specific hooks or wrappers
-    - maintain total model FLOP
+    - maintain total model FLOP (Forward and Backward)
     - expose aggregate model FLOP
-
-    Notes:
-    - only model FLOP belong here
-    - loss / optimizer / preprocessing FLOP are tracked elsewhere
     """
-
     def __init__(self, model, logger=None):
         self.model = model
         self.logger = logger
-        self.total_flop: int = 0
-        self.total_bop: int = 0
+        # --- Forward metrics ---
+        self.total_forward_flop: int = 0
+        self.total_forward_bop: int = 0
         self._last_batch_flop: int = 0
         self._last_batch_bop: int = 0
+        # --- Backward metrics ---
+        self.total_backward_flop: int = 0
+        self.total_backward_bop: int = 0
+        self._last_batch_backward_flop: int = 0
+        self._last_batch_backward_bop: int = 0
         self._batch_idx: int = 0
 
     @abstractmethod
@@ -35,14 +36,28 @@ class BaseBackend(ABC):
         """Detach hooks / wrappers used to count model FLOP."""
         ...
 
-    def get_total_flop(self) -> int:
-        return int(self.total_flop)
+    # ------------------------------------------------------------
+    # Forward Getters
+    # ------------------------------------------------------------
+
+    def get_total_forward_flop(self) -> int:
+        return int(self.total_forward_flop)
 
     def get_last_batch_flop(self) -> int:
         return int(self._last_batch_flop)
 
-    def get_total_bop(self) -> int:
-        return int(self.total_bop)
+    def get_total_forward_bop(self) -> int:
+        return int(self.total_forward_bop)
 
     def get_last_batch_bop(self) -> int:
         return int(self._last_batch_bop)
+
+    # ------------------------------------------------------------
+    # Backward Getters
+    # ------------------------------------------------------------
+
+    def get_total_backward_flop(self) -> int:
+        return int(self.total_backward_flop)
+
+    def get_total_backward_bop(self) -> int:
+        return int(self.total_backward_bop)
