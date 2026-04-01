@@ -4,17 +4,27 @@
 [![Version](https://img.shields.io/badge/version-0.1.0-orange.svg)](#)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-**FLOPpy** is a Python library designed to estimate and monitor the computational workload of Machine Learning (ML) and Deep Learning (DL) models. By systematically counting **Floating Point Operations (FLOPs)** and **BOPs (Bit-OPerations)**, the library enables a hardware-independent assessment of the algorithmic workload. Unlike metrics such as execution time or energy consumption, FLOPs reflect the intrinsic computational demand of an algorithm, ensuring comparability and reproducibility across different systems.
+**FLOPpy** is a versatile Python library designed to monitor and estimate the algorithmic workload of both **Deep Learning (PyTorch)** and **Machine Learning (Scikit-learn)** models. 
 
----
+By systematically tracking **Floating Point Operations (FLOPs)** and **BOPs (Bit-OPerations)**, it provides a hardware-independent assessment of the total computational demand, spanning from standard **Forward** and **Backward** passes to **Optimizer updates** and **Loss** evaluations.
 
 ## 🚀 Key Features
 
 * **Hardware-Agnostic Monitoring**: Provides a standardized measure of computational demand that does not depend on specific hardware characteristics or infrastructure;
-* **Broad Framework Support**: Offers a unified interface for models implemented in **PyTorch** (including **Hugging Face** models) and **Scikit-learn**;
-* **Comprehensive Pipeline Tracking**: Beyond simple forward passes, it accounts for **backward passes**, **optimizer updates**, **loss evaluations**, **tokenizer operations** and so on;
-* **Modular Architecture**: Designed with a provider pattern and structural decoupling, allowing easy extension to other backends;
+* **Cross-Framework Support**: Seamlessly profile models from `torch` (including `Hugging Face` models) and `scikit-learn` using a unified API;
+* **Modular Architecture**: Designed with a provider pattern and structural decoupling, allowing easy extension to other backends; 
+* **Full Pipeline Tracking**: Go beyond simple inference, monitor the cost of training (Backward pass), Loss computation, Optimizer steps, and even pre-processing operations like tokenization;
+* **Transparent Integration**: Zero-boilerplate integration via a non-intrusive, hook-based architecture and safe monkey-patching;
+* **The "Escape Hatch"**: Native support for tracking **quantized layers** (e.g., 4-bit, 8-bit) and **fused/custom optimizers** (BitsAndBytes, Apex, DeepSpeed) that typically bypass standard profilers;
+* **Reproducibility**: Unlike execution time or energy metrics, FLOPs and BOPs reflect the intrinsic complexity of an algorithm, ensuring consistent results across different systems;
 * **Real-time Integration**: Supports seamless synchronization with **Weights & Biases (WandB)** for real-time visualization.
+
+## 📊 Why FLOPpy?
+
+In an era of large-scale models and specialized hardware, execution time is no longer a sufficient metric for efficiency. **FLOPpy** allows researchers and developers to:
+1. Compare the efficiency of different architectures regardless of the GPU/CPU used;
+2. Quantify the real computational savings of quantization (FP16 vs INT8 vs INT4);
+3. Identify bottlenecks in the training loop, including the often-overlooked optimizer overhead.
 
 ---
 
@@ -109,28 +119,38 @@ report = tracker.report(print_summary=True)
 
 ## 🔬 Methodology
 
-FLOPpy employs distinct strategies to ensure computational accuracy:
+### 🛠️ Computational Strategy & Backends
 
-* **PyTorch (Hybrid Methodology):** Synergistically combines two approaches to capture the full training lifecycle:
-  * **Module Hooks:** Uses `TorchTrainingHooks` to register forward hooks on standard neural network layers, dynamically intercepting tensor shapes to apply theoretically derived formulas for components like convolutions and linear projections;
-  * **Low-level Dispatching:** Deploys `TorchDispatchMode` to intercept underlying C++ ATen dispatch calls. This captures "loose" operations outside of `nn.Module` objects, such as residual skip connections, loss computations, and in-place tensor manipulations executed by optimizers during the backward pass;
-* **Scikit-learn:** Implements a dynamic method-wrapping strategy through the `SklearnBackend`. It intercepts standard API methods (e.g., `fit()`, `predict()`) to extract input/output array dimensions and applies targeted algorithmic complexity formulas.
+**FLOPpy** employs high-precision, transparent strategies across different frameworks to ensure maximum accuracy without requiring any changes to the user's original code.
+
+#### **PyTorch: Unified Dispatch & Patching**
+The library avoids the overhead and limitations of traditional per-module hooks by operating directly at the functional and tensor level:
+
+* **Root Hooks & Low-Level Dispatching:** Instead of attaching hooks to every single sub-module, FLOPpy attaches a single boundary hook to the root model. Inside this forward pass, it deploys `TorchDispatchMode` via the `UniversalFlopCounter` to intercept underlying C++ ATen dispatch calls in real-time. This captures all mathematical operations, including those occurring outside of standard `nn.Module` objects, such as residual skip connections and element-wise tensor manipulations;
+* **Transparent Backward Tracking:** Implements safe monkey-patching of `torch.Tensor.backward`. This encapsulates the entire Autograd graph execution within a tracking context, overcoming the well-known architectural limitations of standard PyTorch backward hooks on container modules (e.g., `nn.Sequential`);
+* **Optimizer & Loss Hooks:** Utilizes targeted `TorchTrainingHooks` to intercept `optimizer.step()` calls and loss function evaluations. It features a specialized **"Escape Hatch"** fallback logic to accurately estimate the workload of fused or quantized optimizers (e.g., *BitsAndBytes*, *Apex*, *DeepSpeed*) that execute custom C++/CUDA kernels and bypass the standard PyTorch dispatcher.
+
+#### **Scikit-Learn: Dynamic API Wrapping**
+The `SklearnBackend` implements a non-intrusive method-wrapping strategy to seamlessly support classical Machine Learning workflows:
+
+* **Method Interception:** Automatically wraps standard API methods—`fit()`, `predict()`, and `transform()`—to extract input and output array dimensions at runtime.
+* **Semantic Mapping:** Intelligently maps execution phases to ensure report consistency across both Deep Learning and Machine Learning frameworks:
+    * **`fit()`** operations are reported as **Model (Backward)** to represent the training and weight-update phase;
+    * **`predict()`** and **`transform()`** operations are reported as **Model (Forward)** to represent the inference phase;
+* **Algorithmic Complexity:** Applies targeted mathematical complexity formulas (e.g., $O(n_{trees} \cdot n_{samples} \cdot \log_2(n_{samples}))$ for Random Forests) based on array shapes and data types to provide accurate, hardware-independent workload and BOPs estimates.
 
 ---
 
-## 📊 Output Metrics
+### 📊 Detailed Reporting
 
-The `FLOPpyReport` object provides detailed statistics:
+The `FLOPpyReport` object provides a detailed, phase-aware breakdown of the computational workload:
 
-* **`model_flops`**: The core algorithmic cost derived from the model's structural layers;
-* **`optimizer_flops`**: Computational overhead introduced by the optimization step, such as gradient updates and momentum calculations;
-* **`loss_flops`**: Operations related to the loss function computation;
-* **`model_bops`**: The precision-aware hardware computational effort of the model's architecture, calculated as Bit-Operations (BOPs) to reflect the underlying data types (e.g. INT8 vs. FP32);
-* **`optimizer_bops`**: The hardware-level computational cost of the optimization step, accounting for the specific bit-width used during gradient updates and weight adjustments;
-* **`loss_bops`**: The actual hardware effort required for the loss function evaluation, measured in Bit-Operations based on the tensor precision;
+* **`model_forward_flops` & `model_forward_bops`**: The algorithmic cost and precision-aware hardware effort (Bit-Operations) of the forward pass. In Scikit-learn workflows, this maps to inference methods like `predict()` and `transform()`;
+* **`model_backward_flops` & `model_backward_bops`**: The computational workload required for the training phase. This captures the Autograd gradient calculation in Deep Learning, or the `fit()` method in classical Machine Learning;
+* **`loss_forward_flops` & `loss_forward_bops`**: The operations and actual hardware effort explicitly tied to evaluating the loss function;
+* **`optimizer_flops` & `optimizer_bops`**: The computational overhead of the optimization step (e.g., weight updates, momentum). It accounts for the specific bit-width used, accurately tracking even fused or quantized optimizers (e.g., 8-bit Adam) via the built-in *Escape Hatch*;
 * **`preproc_ops`**: Workload from input preparation, such as tokenizer operations for Large Language Models;
-* **`SystemInfo`**: A detailed snapshot of the execution environment, including CPU/GPU specifications, RAM, and OS version.
-
+* **`System Environment`**: A detailed snapshot of the execution context, including CPU/GPU specifications, RAM, OS, and active library versions (e.g., PyTorch, Scikit-learn).
 ---
 
 ## ✍️ Authors & Citation

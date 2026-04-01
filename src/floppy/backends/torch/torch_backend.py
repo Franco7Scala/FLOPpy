@@ -24,6 +24,8 @@ class TorchBackend(BaseBackend):
         self._root_handles: list[torch.utils.hooks.RemovableHandle] = []
         self._quant_handles: list[torch.utils.hooks.RemovableHandle] = []
         self._flop_counter: UniversalFlopCounter | None = None
+        self.forward_flops_at_last_backward = 0
+        self.forward_bops_at_last_backward = 0
 
     # ------------------------------------------------------------
     # Lifecycle
@@ -49,26 +51,56 @@ class TorchBackend(BaseBackend):
                 self._quant_handles.extend([h_pre, h_post])
 
         # 3. TRANSPARENT BACKWARD TRACKING (Monkey-Patching)
-        # Save the original PyTorch backward function
+        # Save the original PyTorch C++ Autograd backward function
         self._original_tensor_backward = torch.Tensor.backward
 
-        # Create a wrapper that encapsulates the entire C++ Autograd execution
         def _patched_backward(tensor_obj, *args, **kwargs):
-            counter = UniversalFlopCounter()
-            counter.__enter__()
-            try:
-                # Execute the actual PyTorch backward pass
-                result = self._original_tensor_backward(tensor_obj, *args, **kwargs)
+            # Execute the original PyTorch backward pass
+            result = self._original_tensor_backward(tensor_obj, *args, **kwargs)
 
-            finally:
-                # Ensure the counter is safely closed even if exceptions occur
-                counter.__exit__(None, None, None)
-                self.total_backward_flop += int(getattr(counter, "flops", 0))
-                self.total_backward_bop += int(getattr(counter, "bops", 0))
+            # We check if the loss tensor has a grad_fn (meaning it's part of a graph)
+            # or requires_grad. This is more reliable for Gradient Accumulation.
+            if getattr(tensor_obj, "requires_grad", False) or hasattr(tensor_obj, "grad_fn"):
+
+                # 1. INCREMENTAL LOGIC: Get only the forward work done since the last backward
+                current_total_f = getattr(self, "total_forward_flop", 0)
+                current_total_b = getattr(self, "total_forward_bop", 0)
+
+                step_forward_flops = current_total_f - self.forward_flops_at_last_backward
+                step_forward_bops = current_total_b - self.forward_bops_at_last_backward
+
+                # Avoid calculating if there are no new forward FLOPs (prevents double counting)
+                if step_forward_flops <= 0:
+                    return result
+
+                # 2. PEFT/LoRA RATIO
+                trainable_params = sum(p.numel() for p in self._root_model.parameters() if p.requires_grad)
+                total_params = sum(p.numel() for p in self._root_model.parameters())
+                trainable_ratio = trainable_params / total_params
+
+                # 3. MULTIPLIER (Standard = 2.0, LoRA ~ 1.0)
+                backward_multiplier = 1.0 + (1.0 * trainable_ratio)
+
+                flops_to_add = step_forward_flops * backward_multiplier
+                bops_to_add = step_forward_bops * backward_multiplier
+
+                # We use the generic "total_backward_flop" which is likely what your report maps to.
+                if hasattr(self, "total_backward_flop"):
+                    self.total_backward_flop += flops_to_add
+                if hasattr(self, "total_backward_bop"):
+                    self.total_backward_bop += bops_to_add
+
+                # Also update the specific model-level counters for consistency
+                self.total_model_backward_flop = getattr(self, "total_model_backward_flop", 0) + flops_to_add
+                self.total_model_backward_bop = getattr(self, "total_model_backward_bop", 0) + bops_to_add
+
+                # 5. SYNC PROGRESS
+                self.forward_flops_at_last_backward = current_total_f
+                self.forward_bops_at_last_backward = current_total_b
 
             return result
 
-        # Replace the backward function with our patched version
+        # Apply the monkey-patch globally
         torch.Tensor.backward = _patched_backward
 
     def stop(self):

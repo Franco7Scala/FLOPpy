@@ -9,10 +9,9 @@ from sklearn.svm import SVC, SVR, LinearSVC, LinearSVR
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, Normalizer
 from sklearn.decomposition import PCA
+from ...utils.utility import cprint, Color
 
 import numpy as np
-
-from floppy.utils.utility import cprint, Color
 
 
 class SklearnBackend(BaseBackend):

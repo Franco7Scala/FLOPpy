@@ -157,7 +157,7 @@ class TorchTrainingHooks:
                 num_params = sum(
                     p.numel()
                     for group in optimizer.param_groups
-                    for p in group['params']
+                    for p in group["params"]
                     if p.requires_grad
                 )
                 # B. Algorithmic FLOP estimation per parameter
