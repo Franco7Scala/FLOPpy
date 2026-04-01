@@ -15,23 +15,28 @@ class UniversalFlopCounter(TorchDispatchMode):
     def _get_numel(self, obj):
         if isinstance(obj, torch.Tensor):
             return obj.numel()
+
         elif isinstance(obj, (list, tuple)):
             return sum(self._get_numel(x) for x in obj)
+
         return 0
 
     def _get_first_tensor(self, obj):
         if isinstance(obj, torch.Tensor):
             return obj
+
         elif isinstance(obj, (list, tuple)):
             for x in obj:
                 tensor = self._get_first_tensor(x)
                 if tensor is not None:
                     return tensor
+
         elif isinstance(obj, dict):
             for x in obj.values():
                 tensor = self._get_first_tensor(x)
                 if tensor is not None:
                     return tensor
+
         return None
 
     def _get_effective_bit_width(self, obj) -> int:
@@ -42,14 +47,19 @@ class UniversalFlopCounter(TorchDispatchMode):
         dtype = tensor.dtype
         if dtype in (torch.float64, torch.int64, torch.complex128):
             return 64
+
         elif dtype in (torch.float32, torch.int32, torch.complex64):
             return 32
+
         elif dtype in (torch.float16, torch.bfloat16, torch.int16):
             return 16
+
         elif dtype in (torch.int8, torch.uint8, torch.qint8):
             return 8
+
         elif str(dtype) in ("torch.quint4x2", "torch.int4"):
             return 4
+
         return 32
 
     def _add_ops(self, flop_count: int, ref_obj=None, op_name: str = "unknown"):

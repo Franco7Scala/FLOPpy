@@ -40,7 +40,9 @@ wandb_config = WandbConfiguration(
     group_name="eDPO",
     reporter_key="your_wandb_key_here",
 )
+# or
 wandb_config = None
+
 # ==========================================
 # FLOPpy INTEGRATION
 # ==========================================

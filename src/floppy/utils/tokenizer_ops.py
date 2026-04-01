@@ -6,20 +6,20 @@ import torch
 
 class TokenizerWithOps:
     """
-   A wrapper for a tokenizer (typically HuggingFace) that estimates the cost of tokenization 
-   operations and accumulates it in an internal counter.
-   Objective:
-   - Does not calculate FLOP, but tracks a "cost" metric for the tokenizer.
-   The default cost model is:
+    A wrapper for a tokenizer (typically HuggingFace) that estimates the cost of tokenization
+    operations and accumulates it in an internal counter.
+    Objective:
+    - Does not calculate FLOP, but tracks a "cost" metric for the tokenizer.
+    The default cost model is:
        ops = number of characters + number of tokens generated
-   Attributes:
-   - base_tokenizer : callable
+    Attributes:
+    - base_tokenizer : callable
        The original tokenizer.
-   - cost_model : str
+    - cost_model : str
        The name of the cost model. Currently supported: "chars+tokens".
-   - total_ops : int
+    - total_ops : int
        The total sum of estimated operations.
-   - tracker : optional
+    - tracker : optional
        If provided, it must expose the method add_preproc_ops(int).
     """
 
@@ -60,9 +60,10 @@ class TokenizerWithOps:
     # ------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------
+
     def _normalize_texts(self, texts: Any) -> Sequence[str]:
         """
-        Transforms the input into a list of strings for character count estimation. 
+        Transforms the input into a list of strings for character count estimation.
         If it fails to interpret the input, it returns an empty list.
         """
         if isinstance(texts, str):
