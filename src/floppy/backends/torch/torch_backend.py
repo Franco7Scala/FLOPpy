@@ -81,6 +81,11 @@ class TorchBackend(BaseBackend):
                 # 3. MULTIPLIER (Standard = 2.0, LoRA ~ 1.0)
                 backward_multiplier = 1.0 + (1.0 * trainable_ratio)
 
+                # gradient checkpointing
+                is_checkpointing = getattr(self._root_model, "is_gradient_checkpointing", False)
+                if is_checkpointing:
+                    backward_multiplier += 1.0
+
                 flops_to_add = step_forward_flops * backward_multiplier
                 bops_to_add = step_forward_bops * backward_multiplier
 
