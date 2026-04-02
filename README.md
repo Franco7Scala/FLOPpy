@@ -34,19 +34,6 @@ In an era of large-scale models and specialized hardware, execution time is no l
 pip install floppy-tracker
 ```
 
-## Dependencies
-
-The library requires the following environment and tools:
-
-* **Python**: Core language.
-* **NumPy**: Used for multidimensional array manipulation and analytical complexity formulas.
-* **Scikit-Learn**: Supported for monitoring classical machine learning algorithms.
-* **PyTorch**: Supported for deep learning tracking via high-level hooks and low-level ATen dispatching.
-* **psutil**: Essential for capturing detailed hardware snapshots, including CPU cores, RAM, and system usage.
-* **Wandb**: Used for real-time visualization and remote experiment tracking.
-
----
-
 ## 📖 Usage
 
 Integration is transparent and does not require modifications to the model implementation.
