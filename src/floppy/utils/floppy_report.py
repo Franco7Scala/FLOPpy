@@ -1,8 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
-from floppy.utils.system_info import SystemInfo
-from floppy.utils.wandb_configuration import WandbConfiguration
+from ..utils.system_info import SystemInfo
+from ..utils.wandb_configuration import WandbConfiguration
 
 
 @dataclass

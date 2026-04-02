@@ -1,6 +1,5 @@
 from __future__ import annotations
 from typing import Any, Callable, Optional
-from floppy.backends.base import BaseBackend
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, LogisticRegression, SGDClassifier, SGDRegressor
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
@@ -9,6 +8,7 @@ from sklearn.svm import SVC, SVR, LinearSVC, LinearSVR
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, Normalizer
 from sklearn.decomposition import PCA
+from ..base import BaseBackend
 from ...utils.utility import cprint, Color
 
 import numpy as np

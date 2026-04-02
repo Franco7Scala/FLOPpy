@@ -31,7 +31,7 @@ In an era of large-scale models and specialized hardware, execution time is no l
 ## 📦 Installation
 
 ```bash 
-pip install floppy-lib
+pip install floppy-tracker
 ```
 
 ## Dependencies
