@@ -1,7 +1,7 @@
 # FLOPpy: A hardware-agnostic Python library to monitor the computational cost of Machine and Deep Learning algorithms 
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Version](https://img.shields.io/badge/version-0.1.0-orange.svg)](#)
+[![Version](https://img.shields.io/badge/version-0.1.1-orange.svg)](#)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
 **FLOPpy** is a versatile Python library designed to monitor and estimate the algorithmic workload of both **Deep Learning (PyTorch)** and **Machine Learning (Scikit-learn)** models. 
@@ -45,10 +45,9 @@ import torch.nn as nn
 from floppy import FLOPpyTracker, WandbConfiguration
 from transformers import AutoModel
 
-
 wandb_config = WandbConfiguration(
   project_name="your_experiment",
-  group_name="your_group", 
+  group_name="your_group",
   reporter_key="your_wandb_key_here"
 )
 
@@ -66,16 +65,16 @@ tracker.run(model=model, optimizer=optimizer, loss_fn=loss_fn)
 
 # 4. Do something with the model
 for _ in range(num_epochs):
-    for xb, yb in your_data_loader:
-        optimizer.zero_grad()
-        y_hat = model(xb)
-        loss = loss_fn(y_hat, yb)
-        loss.backward()
-        optimizer.step()
-        tracker.batch()
+  for xb, yb in your_data_loader:
+    optimizer.zero_grad()
+    y_hat = model(xb)
+    loss = loss_fn(y_hat, yb)
+    loss.backward()
+    optimizer.step()
+    tracker.batch()
 
-    tracker.epoch()
-    
+  tracker.epoch()
+
 # 5. Access the report
 report = tracker.report()
 print(report)

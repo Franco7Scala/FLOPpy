@@ -24,6 +24,7 @@ class TorchBackend(BaseBackend):
         self._root_handles: list[torch.utils.hooks.RemovableHandle] = []
         self._quant_handles: list[torch.utils.hooks.RemovableHandle] = []
         self._flop_counter: UniversalFlopCounter | None = None
+        self._forward_depth = 0
         self.forward_flops_at_last_backward = 0
         self.forward_bops_at_last_backward = 0
 
@@ -108,6 +109,21 @@ class TorchBackend(BaseBackend):
         # Apply the monkey-patch globally
         torch.Tensor.backward = _patched_backward
 
+        # TRANSPARENT GENERATE TRACKING (Monkey-Patching for Hugging Face)
+        if hasattr(self._root_model, "generate") and callable(getattr(self._root_model, "generate")):
+            self._original_generate = self._root_model.generate
+            def _patched_generate(*args, **kwargs):
+                self._on_forward_start(self._root_model, args)
+                try:
+                    result = self._original_generate(*args, **kwargs)
+
+                finally:
+                    self._on_forward_end(self._root_model, args, None)
+
+                return result
+
+            self._root_model.generate = _patched_generate
+
     def stop(self):
         """Detaches all hooks and restores monkey-patched methods."""
         for handle in self._root_handles:
@@ -124,33 +140,45 @@ class TorchBackend(BaseBackend):
             torch.Tensor.backward = self._original_tensor_backward
             self._original_tensor_backward = None
 
+        # Restore the original generate function
+        if hasattr(self, "_original_generate") and self._original_generate is not None:
+            self._root_model.generate = self._original_generate
+            self._original_generate = None
+
     # ------------------------------------------------------------
     # Root forward hooks (DispatchMode Integration)
     # ------------------------------------------------------------
 
     def _on_forward_start(self, module, inputs):
         """Initializes and enters the UniversalFlopCounter context manager."""
-        self._flop_counter = UniversalFlopCounter()
-        self._flop_counter.__enter__()
+        if self._forward_depth == 0:
+            self._flop_counter = UniversalFlopCounter()
+            self._flop_counter.__enter__()
+
+        self._forward_depth += 1
 
     def _on_forward_end(self, module, inputs, output):
         """Exits the counter, extracts the metrics, and updates the global states."""
-        self._batch_idx += 1
-        forward_flop = 0
-        forward_bop = 0
-        if self._flop_counter is not None:
-            # Close the context manager to stop intercepting operations
-            self._flop_counter.__exit__(None, None, None)
-            # Extract the calculated totals
-            forward_flop = int(getattr(self._flop_counter, "flops", 0))
-            forward_bop = int(getattr(self._flop_counter, "bops", 0))
+        self._forward_depth -= 1
+        if self._forward_depth == 0:
+            self._batch_idx += 1
+            forward_flop = 0
+            forward_bop = 0
 
-        # Update batch metrics
-        self._last_batch_flop = forward_flop
-        self._last_batch_bop = forward_bop
-        # Update global accumulated metrics (inherited from BaseBackend)
-        self.total_forward_flop += forward_flop
-        self.total_forward_bop += forward_bop
+            if self._flop_counter is not None:
+                # Close the context manager to stop intercepting operations
+                self._flop_counter.__exit__(None, None, None)
+                # Extract the calculated totals
+                forward_flop = int(getattr(self._flop_counter, "flops", 0))
+                forward_bop = int(getattr(self._flop_counter, "bops", 0))
+                self._flop_counter = None
+
+            # Update batch metrics
+            self._last_batch_flop = forward_flop
+            self._last_batch_bop = forward_bop
+            # Update global accumulated metrics
+            self.total_forward_flop += forward_flop
+            self.total_forward_bop += forward_bop
 
     # ------------------------------------------------------------
     # Quantized "Escape Hatch" hooks

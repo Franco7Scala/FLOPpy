@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Any, Optional
 from torch.optim import Optimizer
 from .core import Tracker
-from .backends.sklearn.sklearn_backend import SklearnBackend
+from .backends.sklearn_impl.sklearn_backend import SklearnBackend
 from .utils.floppy_report import FLOPpyReport
 from .utils.system_info import get_system_info, SystemInfo
 from .utils.tokenizer_ops import TokenizerWithOps

@@ -3,7 +3,7 @@ from contextlib import AbstractContextManager
 from typing import Any, Dict, Optional
 from .backends import create_backend
 from .logging import create_logger
-from .backends.torch.hooks.training_hooks import TorchTrainingHooks
+from .backends.torch_impl.hooks.training_hooks import TorchTrainingHooks
 from .utils.tokenizer_ops import wrap_tokenizer
 from .utils.wandb_configuration import WandbConfiguration
 
@@ -177,7 +177,7 @@ class Tracker(AbstractContextManager):
         )
 
     # ------------------------------------------------------------
-    # API hooks (torch)
+    # API hooks (torch_impl)
     # ------------------------------------------------------------
     def attach_torch_hooks(self, model, loss_fn=None, optimizer=None, enable_debug_print: bool = False) -> None:
         """
