@@ -146,7 +146,20 @@ The `FLOPpyReport` object provides a detailed, phase-aware breakdown of the comp
 
 If you use FLOPpy in your research, please cite:
 
-> Coming soon...
+ ```
+  @article{SCALA2026102865,
+   title = {FLOPpy: A hardware-agnostic Python library to monitor the computational cost of machine and deep learning algorithms},
+    journal = {SoftwareX},
+    volume = {35},
+    pages = {102865},
+    year = {2026},
+    issn = {2352-7110},
+    doi = {https://doi.org/10.1016/j.softx.2026.102865},
+    url = {https://www.sciencedirect.com/science/article/pii/S2352711026003572},
+    author = {Francesco Scala and Francesco Mandarino and Liliana Martirano and Luigi Pontieri},
+    keywords = {Green AI, Computational workload, Hardware-agnostic, Deep learning, Machine learning, Floating point operations, Bit-operations}
+}
+```
 
 ---
 
