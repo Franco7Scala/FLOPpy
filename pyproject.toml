@@ -31,7 +31,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Franco7Scala/FLOPpy"
+Homepage = "https://floppy.icar.cnr.it/"
 "Bug Tracker" = "https://github.com/Franco7Scala/FLOPpy/issues"
 Documentation = "https://floppy.readthedocs.io/en/latest/"
 
