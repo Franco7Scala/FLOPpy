@@ -1,0 +1,668 @@
+#include "native_counter.h"
+
+#include "cost_utils.h"
+#include "diagnostics.h"
+#include "dtype_utils.h"
+#include "operator_registry.h"
+
+#include <ATen/ATen.h>
+#include <ATen/record_function.h>
+#include <pybind11/stl.h>
+
+#include <atomic>
+#include <cstdint>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+namespace py = pybind11;
+
+namespace floppy::native {
+
+class NativeCounterProbe;
+
+thread_local NativeCounterProbe* tls_active_probe = nullptr;
+
+/**
+ * Probe nativo utilizzato per intercettare gli operatori
+ * ATen e accumularne i FLOP.
+ */
+class NativeCounterProbe {
+public:
+    NativeCounterProbe() = default;
+
+    NativeCounterProbe(
+        const NativeCounterProbe&
+    ) = delete;
+
+    NativeCounterProbe& operator=(
+        const NativeCounterProbe&
+    ) = delete;
+
+    NativeCounterProbe(
+        NativeCounterProbe&&
+    ) = delete;
+
+    NativeCounterProbe& operator=(
+        NativeCounterProbe&&
+    ) = delete;
+
+    ~NativeCounterProbe() {
+        stop_noexcept();
+    }
+
+    /**
+     * Avvia l'intercettazione nel thread corrente.
+     */
+    void start() {
+        if (active_) {
+            throw std::runtime_error(
+                "NativeCounterProbe is already active."
+            );
+        }
+
+        if (tls_active_probe != nullptr) {
+            throw std::runtime_error(
+                "Another NativeCounterProbe is already "
+                "active in the current thread."
+            );
+        }
+
+        paused_.store(
+            false,
+            std::memory_order_relaxed
+        );
+
+        tls_active_probe = this;
+        active_ = true;
+
+        try {
+            at::RecordFunctionCallback callback(
+                &NativeCounterProbe::on_function_start
+            );
+
+            callback
+                .needsInputs(true)
+                .needsOutputs(false)
+                .needsIds(false)
+                .samplingProb(1.0)
+                .scopes(
+                    std::unordered_set<
+                        at::RecordScope
+                    >{
+                        at::RecordScope::FUNCTION
+                    }
+                );
+
+            callback_handle_ =
+                at::addThreadLocalCallback(
+                    std::move(callback)
+                );
+        }
+        catch (...) {
+            active_ = false;
+            tls_active_probe = nullptr;
+
+            callback_handle_ =
+                at::INVALID_CALLBACK_HANDLE;
+
+            throw;
+        }
+    }
+
+    /**
+     * Interrompe l'intercettazione.
+     */
+    void stop() {
+        if (!active_) {
+            return;
+        }
+
+        if (
+            callback_handle_ !=
+            at::INVALID_CALLBACK_HANDLE
+        ) {
+            at::removeCallback(
+                callback_handle_
+            );
+
+            callback_handle_ =
+                at::INVALID_CALLBACK_HANDLE;
+        }
+
+        paused_.store(
+            false,
+            std::memory_order_relaxed
+        );
+
+        active_ = false;
+
+        if (tls_active_probe == this) {
+            tls_active_probe = nullptr;
+        }
+    }
+
+    /**
+     * Azzera tutti i dati raccolti.
+     */
+    void reset() {
+        event_count_.store(
+            0,
+            std::memory_order_relaxed
+        );
+
+        total_flops_.store(
+            0,
+            std::memory_order_relaxed
+        );
+
+        total_bops_.store(
+            0,
+            std::memory_order_relaxed
+        );
+
+        paused_.store(
+            false,
+            std::memory_order_relaxed
+        );
+
+        operator_counts_.clear();
+        operator_input_signatures_.clear();
+        operator_flops_.clear();
+        operator_bops_.clear();
+        operator_errors_.clear();
+    }
+
+    /**
+     * Sospende temporaneamente il conteggio.
+     */
+    void pause() {
+        paused_.store(
+            true,
+            std::memory_order_relaxed
+        );
+    }
+
+    /**
+     * Riprende il conteggio dopo una pausa.
+     */
+    void resume() {
+        paused_.store(
+            false,
+            std::memory_order_relaxed
+        );
+    }
+
+    /**
+     * Aggiunge un contributo FLOP calcolato esternamente.
+     */
+    void add_flops(
+        const std::uint64_t value
+    ) {
+        const std::uint64_t current =
+            total_flops_.load(
+                std::memory_order_relaxed
+            );
+
+        total_flops_.store(
+            checked_add(current, value),
+            std::memory_order_relaxed
+        );
+    }
+
+    /**
+     * Aggiunge un contributo BOP calcolato esternamente.
+     */
+    void add_bops(
+        const std::uint64_t value
+    ) {
+        const std::uint64_t current =
+            total_bops_.load(
+                std::memory_order_relaxed
+            );
+
+        total_bops_.store(
+            checked_add(current, value),
+            std::memory_order_relaxed
+        );
+    }
+
+    bool active() const {
+        return active_;
+    }
+
+    bool paused() const {
+        return paused_.load(
+            std::memory_order_relaxed
+        );
+    }
+
+    std::uint64_t event_count() const {
+        return event_count_.load(
+            std::memory_order_relaxed
+        );
+    }
+
+    std::uint64_t total_flops() const {
+        return total_flops_.load(
+            std::memory_order_relaxed
+        );
+    }
+
+    std::uint64_t total_bops() const {
+        return total_bops_.load(
+            std::memory_order_relaxed
+        );
+    }
+
+    std::unordered_map<
+        std::string,
+        std::uint64_t
+    >
+    operator_counts() const {
+        return operator_counts_;
+    }
+
+    std::unordered_map<
+        std::string,
+        std::string
+    >
+    operator_input_signatures() const {
+        return operator_input_signatures_;
+    }
+
+    std::unordered_map<
+        std::string,
+        std::uint64_t
+    >
+    operator_flops() const {
+        return operator_flops_;
+    }
+
+    std::unordered_map<
+        std::string,
+        std::uint64_t
+    >
+    operator_bops() const {
+        return operator_bops_;
+    }
+
+    std::unordered_map<
+        std::string,
+        std::string
+    >
+    operator_errors() const {
+        return operator_errors_;
+    }
+
+    std::vector<std::string>
+    supported_operators() const {
+        return OperatorRegistry::instance()
+            .supported_operators();
+    }
+
+private:
+    /**
+     * Callback richiamata all'inizio di ogni operatore
+     * intercettato da RecordFunction.
+     */
+    static std::unique_ptr<
+        at::ObserverContext
+    >
+    on_function_start(
+        const at::RecordFunction& function
+    ) {
+        NativeCounterProbe* probe =
+            tls_active_probe;
+
+        if (
+            probe == nullptr ||
+            !probe->active_ ||
+            probe->paused()
+        ) {
+            return nullptr;
+        }
+
+        probe->record_function(function);
+
+        return nullptr;
+    }
+
+    /**
+     * Registra l'evento e, quando disponibile, utilizza
+     * il registro per individuarne il calcolatore FLOP.
+     */
+    void record_function(
+        const at::RecordFunction& function
+    ) {
+        const char* raw_name =
+            function.name();
+
+        const std::string operator_name =
+            raw_name != nullptr
+                ? std::string(raw_name)
+                : std::string("<unnamed>");
+
+        event_count_.fetch_add(
+            1,
+            std::memory_order_relaxed
+        );
+
+        ++operator_counts_[operator_name];
+
+        try {
+            operator_input_signatures_[
+                operator_name
+            ] = describe_inputs(function);
+        }
+        catch (const std::exception& error) {
+            operator_input_signatures_[
+                operator_name
+            ] =
+                std::string(
+                    "<input inspection failed: "
+                )
+                + error.what()
+                + ">";
+        }
+        catch (...) {
+            operator_input_signatures_[
+                operator_name
+            ] =
+                "<input inspection failed>";
+        }
+
+        try {
+            const OperatorRegistry& registry =
+                OperatorRegistry::instance();
+
+            const FlopCalculator calculator =
+                registry.find(operator_name);
+
+            /*
+             * L'operatore è stato osservato, ma non dispone
+             * ancora di un calcolatore FLOP.
+             */
+            if (calculator == nullptr) {
+                return;
+            }
+
+            const std::uint64_t flops =
+                calculator(function);
+
+            if (flops == 0) {
+                return;
+            }
+
+            const std::uint64_t bit_width =
+                get_effective_bit_width(
+                    function
+                );
+
+            const std::uint64_t bops =
+                checked_multiply(
+                    flops,
+                    bit_width
+                );
+
+            operator_flops_[operator_name] =
+                checked_add(
+                    operator_flops_[
+                        operator_name
+                    ],
+                    flops
+                );
+
+            operator_bops_[operator_name] =
+                checked_add(
+                    operator_bops_[
+                        operator_name
+                    ],
+                    bops
+                );
+
+            add_flops(flops);
+            add_bops(bops);
+        }
+        catch (const std::exception& error) {
+            operator_errors_[operator_name] =
+                error.what();
+        }
+        catch (...) {
+            operator_errors_[operator_name] =
+                "Unknown FLOP calculation error.";
+        }
+    }
+
+    /**
+     * Versione noexcept di stop(), utilizzata dal distruttore.
+     */
+    void stop_noexcept() noexcept {
+        if (!active_) {
+            return;
+        }
+
+        try {
+            if (
+                callback_handle_ !=
+                at::INVALID_CALLBACK_HANDLE
+            ) {
+                at::removeCallback(
+                    callback_handle_
+                );
+            }
+        }
+        catch (...) {
+            /*
+             * Un distruttore non deve propagare eccezioni.
+             */
+        }
+
+        callback_handle_ =
+            at::INVALID_CALLBACK_HANDLE;
+
+        paused_.store(
+            false,
+            std::memory_order_relaxed
+        );
+
+        active_ = false;
+
+        if (tls_active_probe == this) {
+            tls_active_probe = nullptr;
+        }
+    }
+
+private:
+    bool active_ = false;
+
+    std::atomic<bool>
+        paused_{false};
+
+    at::CallbackHandle callback_handle_ =
+        at::INVALID_CALLBACK_HANDLE;
+
+    std::atomic<std::uint64_t>
+        event_count_{0};
+
+    std::atomic<std::uint64_t>
+        total_flops_{0};
+
+    std::atomic<std::uint64_t>
+        total_bops_{0};
+
+    std::unordered_map<
+        std::string,
+        std::uint64_t
+    >
+        operator_counts_;
+
+    std::unordered_map<
+        std::string,
+        std::string
+    >
+        operator_input_signatures_;
+
+    std::unordered_map<
+        std::string,
+        std::uint64_t
+    >
+        operator_flops_;
+
+    std::unordered_map<
+        std::string,
+        std::uint64_t
+    >
+        operator_bops_;
+
+    std::unordered_map<
+        std::string,
+        std::string
+    >
+        operator_errors_;
+};
+
+void bind_native_counter(
+    py::module_& module
+) {
+    module.doc() =
+            "Native proof-of-concept FLOP counter "
+            "for PyTorch ATen operators.";
+
+        py::class_<NativeCounterProbe>(
+            module,
+            "NativeCounterProbe"
+        )
+            .def(py::init<>())
+
+            .def(
+                "start",
+                &NativeCounterProbe::start,
+                "Start intercepting ATen operators."
+            )
+
+            .def(
+                "stop",
+                &NativeCounterProbe::stop,
+                "Stop intercepting ATen operators."
+            )
+
+            .def(
+                "reset",
+                &NativeCounterProbe::reset,
+                "Reset all collected data."
+            )
+
+            .def(
+                "pause",
+                &NativeCounterProbe::pause,
+                "Temporarily pause operator counting."
+            )
+
+            .def(
+                "resume",
+                &NativeCounterProbe::resume,
+                "Resume operator counting."
+            )
+
+            .def(
+                "add_flops",
+                &NativeCounterProbe::add_flops,
+                "Add a manually calculated FLOP contribution."
+            )
+
+            .def(
+                "add_bops",
+                &NativeCounterProbe::add_bops,
+                "Add a manually calculated BOP contribution."
+            )
+
+            .def_property_readonly(
+                "active",
+                &NativeCounterProbe::active
+            )
+
+            .def_property_readonly(
+                "paused",
+                &NativeCounterProbe::paused
+            )
+
+            .def_property_readonly(
+                "event_count",
+                &NativeCounterProbe::event_count
+            )
+
+            .def_property_readonly(
+                "total_flops",
+                &NativeCounterProbe::total_flops
+            )
+
+            .def_property_readonly(
+                "total_bops",
+                &NativeCounterProbe::total_bops
+            )
+
+            .def_property_readonly(
+                "operator_counts",
+                &NativeCounterProbe::operator_counts
+            )
+
+            .def_property_readonly(
+                "operator_input_signatures",
+                &NativeCounterProbe::
+                    operator_input_signatures
+            )
+
+            .def_property_readonly(
+                "operator_flops",
+                &NativeCounterProbe::operator_flops
+            )
+
+            .def_property_readonly(
+                "operator_bops",
+                &NativeCounterProbe::operator_bops
+            )
+
+            .def_property_readonly(
+                "operator_errors",
+                &NativeCounterProbe::operator_errors
+            )
+
+            .def_property_readonly(
+                "supported_operators",
+                &NativeCounterProbe::
+                    supported_operators
+            )
+
+            .def(
+                "__enter__",
+                [](
+                    NativeCounterProbe& self
+                ) -> NativeCounterProbe& {
+                    self.start();
+
+                    return self;
+                },
+                py::return_value_policy::
+                    reference_internal
+            )
+
+            .def(
+                "__exit__",
+                [](
+                    NativeCounterProbe& self,
+                    const py::object&,
+                    const py::object&,
+                    const py::object&
+                ) {
+                    self.stop();
+
+                    return false;
+                }
+            );
+}
+
+}  // namespace floppy::native

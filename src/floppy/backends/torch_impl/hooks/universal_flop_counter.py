@@ -1,31 +1,122 @@
-import torch
-from torch.utils._python_dispatch import TorchDispatchMode
+from __future__ import annotations
 
-try:
-    from ._flop_counter_core import compute_operation
-except Exception:
-    compute_operation = None
+from ._native_counter_probe import NativeCounterProbe
 
 
-class UniversalFlopCounter(TorchDispatchMode):
+class UniversalFlopCounter:
+    """
+    Lightweight Python adapter for the native C++ FLOP/BOP counter.
 
-    def __init__(self):
-        super().__init__()
-        self.flops = 0
-        self.bops = 0
-        self.paused = False
+    The public interface remains compatible with the previous
+    TorchDispatchMode-based implementation, while all interception
+    and counting are delegated to RecordFunction in C++.
+    """
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        kwargs = kwargs or {}
+    def __init__(self) -> None:
+        self._native = NativeCounterProbe()
 
-        if self.paused:
-            return func(*args, **kwargs)
+    def start(self) -> UniversalFlopCounter:
+        """Start native ATen operator interception."""
+        self._native.start()
+        return self
 
-        out = func(*args, **kwargs)
+    def stop(self) -> UniversalFlopCounter:
+        """Stop native ATen operator interception."""
+        self._native.stop()
+        return self
 
-        if compute_operation is not None:
-            delta_flops, delta_bops = compute_operation(func, args, out)
-            self.flops += int(delta_flops)
-            self.bops += int(delta_bops)
+    def reset(self) -> UniversalFlopCounter:
+        """Reset all native counters and diagnostic data."""
+        self._native.reset()
+        return self
 
-        return out
+    def pause(self) -> UniversalFlopCounter:
+        """Temporarily suspend counting without removing the callback."""
+        self._native.pause()
+        return self
+
+    def resume(self) -> UniversalFlopCounter:
+        """Resume counting after a pause."""
+        self._native.resume()
+        return self
+
+    def add_flops(self, value: int) -> UniversalFlopCounter:
+        """Add a manual FLOP contribution."""
+        numeric_value = int(value)
+
+        if numeric_value < 0:
+            raise ValueError("FLOP contribution cannot be negative.")
+
+        self._native.add_flops(numeric_value)
+        return self
+
+    def add_bops(self, value: int) -> UniversalFlopCounter:
+        """Add a manual BOP contribution."""
+        numeric_value = int(value)
+
+        if numeric_value < 0:
+            raise ValueError("BOP contribution cannot be negative.")
+
+        self._native.add_bops(numeric_value)
+        return self
+
+    @property
+    def flops(self) -> int:
+        return int(self._native.total_flops)
+
+    @property
+    def bops(self) -> int:
+        return int(self._native.total_bops)
+
+    @property
+    def active(self) -> bool:
+        return bool(self._native.active)
+
+    @property
+    def paused(self) -> bool:
+        return bool(self._native.paused)
+
+    @paused.setter
+    def paused(self, value: bool) -> None:
+        if bool(value):
+            self.pause()
+        else:
+            self.resume()
+
+    @property
+    def event_count(self) -> int:
+        return int(self._native.event_count)
+
+    @property
+    def operator_flops(self) -> dict[str, int]:
+        return {
+            str(name): int(value)
+            for name, value in self._native.operator_flops.items()
+        }
+
+    @property
+    def operator_bops(self) -> dict[str, int]:
+        return {
+            str(name): int(value)
+            for name, value in self._native.operator_bops.items()
+        }
+
+    @property
+    def operator_errors(self) -> dict[str, str]:
+        return {
+            str(name): str(value)
+            for name, value in self._native.operator_errors.items()
+        }
+
+    def __enter__(self) -> UniversalFlopCounter:
+        self.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type,
+        exc_value,
+        traceback,
+    ) -> bool:
+        self.stop()
+        return False

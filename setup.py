@@ -1,17 +1,37 @@
 from setuptools import setup
-from pybind11.setup_helpers import Pybind11Extension, build_ext
+from torch.utils.cpp_extension import BuildExtension, CppExtension
+
+
+NATIVE_ROOT = "src/floppy/backends/torch_impl/hooks/native"
 
 
 ext_modules = [
-    Pybind11Extension(
-        "floppy.backends.torch_impl.hooks._flop_counter_core",
-        ["src/floppy/backends/torch_impl/hooks/flop_counter_core.cpp"],
-        cxx_std=17,
+    CppExtension(
+        name="floppy.backends.torch_impl.hooks._native_counter_probe",
+        sources=[
+            f"{NATIVE_ROOT}/bindings.cpp",
+            f"{NATIVE_ROOT}/native_counter.cpp",
+            f"{NATIVE_ROOT}/operator_registry.cpp",
+            f"{NATIVE_ROOT}/dtype_utils.cpp",
+            f"{NATIVE_ROOT}/diagnostics.cpp",
+            f"{NATIVE_ROOT}/operators/elementwise_ops.cpp",
+            f"{NATIVE_ROOT}/operators/linear_ops.cpp",
+            f"{NATIVE_ROOT}/operators/loss_ops.cpp",
+            f"{NATIVE_ROOT}/operators/convolution_ops.cpp",
+        ],
+        extra_compile_args={
+            "cxx": [
+                "-O3",
+                "-std=c++17",
+            ],
+        },
     ),
 ]
 
 
 setup(
     ext_modules=ext_modules,
-    cmdclass={"build_ext": build_ext},
+    cmdclass={
+        "build_ext": BuildExtension,
+    },
 )

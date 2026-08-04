@@ -219,11 +219,11 @@ class TorchBackend(BaseBackend):
                 else:
                     bit_width = 4
 
-                self._flop_counter.flops += total_flops
+                self._flop_counter.add_flops(total_flops)
                 # BOPs heuristic:
                 # The MatMul represents the algorithmic load scaled down by the reduced bit-width,
                 # while the dequantization overhead itself is processed using standard 16-bit logic.
-                self._flop_counter.bops += (matmul_flops * bit_width) + (dequant_flops * 16)
+                self._flop_counter.add_bops((matmul_flops * bit_width) + (dequant_flops * 16))
 
             # Unpause the dispatcher so it resumes listening to standard PyTorch operations
             self._flop_counter.paused = False
