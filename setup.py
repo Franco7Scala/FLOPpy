@@ -7,7 +7,7 @@ NATIVE_ROOT = "src/floppy/backends/torch_impl/hooks/native"
 
 ext_modules = [
     CppExtension(
-        name="floppy.backends.torch_impl.hooks._native_counter_probe",
+        name="floppy.backends.torch_impl.hooks._native_counter",
         sources=[
             f"{NATIVE_ROOT}/bindings.cpp",
             f"{NATIVE_ROOT}/native_counter.cpp",

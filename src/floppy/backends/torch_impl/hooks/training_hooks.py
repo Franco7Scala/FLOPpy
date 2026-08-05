@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Optional
 from .hook_handles import HookHandles
-from .universal_flop_counter import UniversalFlopCounter
+from .flop_counter import UniversalFlopCounter
 from ....utils.utility import Color, cprint
 
 

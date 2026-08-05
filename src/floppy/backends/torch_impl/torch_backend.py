@@ -1,6 +1,6 @@
 from __future__ import annotations
 from ..base import BaseBackend
-from .hooks.universal_flop_counter import UniversalFlopCounter
+from .hooks.flop_counter import UniversalFlopCounter
 
 import torch
 import torch.nn as nn
@@ -12,7 +12,7 @@ class TorchBackend(BaseBackend):
 
     Responsibilities:
     - Handles DataParallel / DDP via .module
-    - Counts ONLY model FLOP using TorchDispatchMode (UniversalFlopCounter)
+    - Counts model FLOPs and BOPs using the native ATen counter (UniversalFlopCounter)
     - Handles quantized layers (BitsAndBytes 4-bit/8-bit) via an escape hatch
     """
     def __init__(self, model: nn.Module, logger=None):
@@ -150,7 +150,7 @@ class TorchBackend(BaseBackend):
     # ------------------------------------------------------------
 
     def _on_forward_start(self, module, inputs):
-        """Initializes and enters the UniversalFlopCounter context manager."""
+        """Start the model FLOP/BOP counter."""
         if self._forward_depth == 0:
             self._flop_counter = UniversalFlopCounter()
             self._flop_counter.__enter__()

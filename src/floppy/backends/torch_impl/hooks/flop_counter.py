@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-from ._native_counter_probe import NativeCounterProbe
+from ._native_counter import NativeCounter
 
 
 class UniversalFlopCounter:
     """
-    Lightweight Python adapter for the native C++ FLOP/BOP counter.
+    Python interface for the native FLOP/BOP counter.
 
-    The public interface remains compatible with the previous
-    TorchDispatchMode-based implementation, while all interception
-    and counting are delegated to RecordFunction in C++.
+    ATen interception and operation counting are performed
+    by the native RecordFunction-based core.
     """
 
     def __init__(self) -> None:
-        self._native = NativeCounterProbe()
+        self._native = NativeCounter()
 
     def start(self) -> UniversalFlopCounter:
         """Start native ATen operator interception."""

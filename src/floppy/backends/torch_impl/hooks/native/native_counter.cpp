@@ -22,23 +22,23 @@ namespace py = pybind11;
 
 namespace floppy::native {
 
-class NativeCounterProbe;
+class NativeCounter;
 
-thread_local NativeCounterProbe* tls_active_probe = nullptr;
+thread_local NativeCounter* tls_active_counter = nullptr;
 
-class NativeCounterObserverContext final
+class NativeCounterContext final
     : public at::ObserverContext {
 public:
-    NativeCounterObserverContext(
-        NativeCounterProbe* probe,
+    NativeCounterContext(
+        NativeCounter* counter,
         bool entered_canonical_scope
     )
-        : probe_(probe),
+        : counter_(counter),
           entered_canonical_scope_(entered_canonical_scope) {
     }
 
-    NativeCounterProbe* probe() const {
-        return probe_;
+    NativeCounter* counter() const {
+        return counter_;
     }
 
     bool entered_canonical_scope() const {
@@ -46,33 +46,33 @@ public:
     }
 
 private:
-    NativeCounterProbe* probe_ = nullptr;
+    NativeCounter* counter_ = nullptr;
     bool entered_canonical_scope_ = false;
 };
 
-class NativeCounterProbe {
+class NativeCounter {
 public:
-    NativeCounterProbe() = default;
+    NativeCounter() = default;
 
-    NativeCounterProbe(const NativeCounterProbe&) = delete;
-    NativeCounterProbe& operator=(const NativeCounterProbe&) = delete;
-    NativeCounterProbe(NativeCounterProbe&&) = delete;
-    NativeCounterProbe& operator=(NativeCounterProbe&&) = delete;
+    NativeCounter(const NativeCounter&) = delete;
+    NativeCounter& operator=(const NativeCounter&) = delete;
+    NativeCounter(NativeCounter&&) = delete;
+    NativeCounter& operator=(NativeCounter&&) = delete;
 
-    ~NativeCounterProbe() {
+    ~NativeCounter() {
         stop_noexcept();
     }
 
     void start() {
         if (active_) {
             throw std::runtime_error(
-                "NativeCounterProbe is already active."
+                "NativeCounter is already active."
             );
         }
 
-        if (tls_active_probe != nullptr) {
+        if (tls_active_counter != nullptr) {
             throw std::runtime_error(
-                "Another NativeCounterProbe is already active "
+                "Another NativeCounter is already active "
                 "in the current thread."
             );
         }
@@ -80,13 +80,13 @@ public:
         paused_.store(false, std::memory_order_relaxed);
         canonical_scope_stack_.clear();
 
-        tls_active_probe = this;
+        tls_active_counter = this;
         active_ = true;
 
         try {
             at::RecordFunctionCallback callback(
-                &NativeCounterProbe::on_function_start,
-                &NativeCounterProbe::on_function_end
+                &NativeCounter::on_function_start,
+                &NativeCounter::on_function_end
             );
 
             callback
@@ -108,7 +108,7 @@ public:
         catch (...) {
             active_ = false;
             canonical_scope_stack_.clear();
-            tls_active_probe = nullptr;
+            tls_active_counter = nullptr;
             callback_handle_ = at::INVALID_CALLBACK_HANDLE;
             throw;
         }
@@ -128,8 +128,8 @@ public:
         canonical_scope_stack_.clear();
         active_ = false;
 
-        if (tls_active_probe == this) {
-            tls_active_probe = nullptr;
+        if (tls_active_counter == this) {
+            tls_active_counter = nullptr;
         }
     }
 
@@ -321,12 +321,12 @@ private:
     on_function_start(
         const at::RecordFunction& function
     ) {
-        NativeCounterProbe* probe = tls_active_probe;
+        NativeCounter* counter = tls_active_counter;
 
         if (
-            probe == nullptr ||
-            !probe->active_ ||
-            probe->paused()
+            counter == nullptr ||
+            !counter->active_ ||
+            counter->paused()
         ) {
             return nullptr;
         }
@@ -343,30 +343,30 @@ private:
 
         bool suppress_flop_calculation = false;
 
-        if (!probe->canonical_scope_stack_.empty()) {
+        if (!counter->canonical_scope_stack_.empty()) {
             suppress_flop_calculation =
                 !enters_canonical_scope ||
-                probe->canonical_ancestor_has_contribution();
+                counter->canonical_ancestor_has_contribution();
         }
 
         const bool contributed =
-            probe->record_function(
+            counter->record_function(
                 function,
                 suppress_flop_calculation
             );
 
         if (contributed) {
-            probe->mark_canonical_scopes_contributed();
+            counter->mark_canonical_scopes_contributed();
         }
 
         if (enters_canonical_scope) {
-            probe->canonical_scope_stack_.push_back(
+            counter->canonical_scope_stack_.push_back(
                 CanonicalScopeState{contributed}
             );
         }
 
-        return std::make_unique<NativeCounterObserverContext>(
-            probe,
+        return std::make_unique<NativeCounterContext>(
+            counter,
             enters_canonical_scope
         );
     }
@@ -376,7 +376,7 @@ private:
         at::ObserverContext* context
     ) {
         auto* counter_context =
-            dynamic_cast<NativeCounterObserverContext*>(
+            dynamic_cast<NativeCounterContext*>(
                 context
             );
 
@@ -387,14 +387,14 @@ private:
             return;
         }
 
-        NativeCounterProbe* probe =
-            counter_context->probe();
+        NativeCounter* counter =
+            counter_context->counter();
 
         if (
-            probe != nullptr &&
-            !probe->canonical_scope_stack_.empty()
+            counter != nullptr &&
+            !counter->canonical_scope_stack_.empty()
         ) {
-            probe->canonical_scope_stack_.pop_back();
+            counter->canonical_scope_stack_.pop_back();
         }
     }
 
@@ -508,8 +508,8 @@ private:
         canonical_scope_stack_.clear();
         active_ = false;
 
-        if (tls_active_probe == this) {
-            tls_active_probe = nullptr;
+        if (tls_active_counter == this) {
+            tls_active_counter = nullptr;
         }
     }
 
@@ -547,38 +547,38 @@ void bind_native_counter(py::module_& module) {
     module.doc() =
         "Native FLOP and BOP counter for PyTorch ATen operators.";
 
-    py::class_<NativeCounterProbe>(
+    py::class_<NativeCounter>(
         module,
-        "NativeCounterProbe"
+        "NativeCounter"
     )
         .def(py::init<>())
-        .def("start", &NativeCounterProbe::start)
-        .def("stop", &NativeCounterProbe::stop)
-        .def("reset", &NativeCounterProbe::reset)
-        .def("pause", &NativeCounterProbe::pause)
-        .def("resume", &NativeCounterProbe::resume)
-        .def("add_flops", &NativeCounterProbe::add_flops)
-        .def("add_bops", &NativeCounterProbe::add_bops)
-        .def_property_readonly("active", &NativeCounterProbe::active)
-        .def_property_readonly("paused", &NativeCounterProbe::paused)
-        .def_property_readonly("event_count", &NativeCounterProbe::event_count)
-        .def_property_readonly("total_flops", &NativeCounterProbe::total_flops)
-        .def_property_readonly("total_bops", &NativeCounterProbe::total_bops)
-        .def_property_readonly("operator_counts", &NativeCounterProbe::operator_counts)
+        .def("start", &NativeCounter::start)
+        .def("stop", &NativeCounter::stop)
+        .def("reset", &NativeCounter::reset)
+        .def("pause", &NativeCounter::pause)
+        .def("resume", &NativeCounter::resume)
+        .def("add_flops", &NativeCounter::add_flops)
+        .def("add_bops", &NativeCounter::add_bops)
+        .def_property_readonly("active", &NativeCounter::active)
+        .def_property_readonly("paused", &NativeCounter::paused)
+        .def_property_readonly("event_count", &NativeCounter::event_count)
+        .def_property_readonly("total_flops", &NativeCounter::total_flops)
+        .def_property_readonly("total_bops", &NativeCounter::total_bops)
+        .def_property_readonly("operator_counts", &NativeCounter::operator_counts)
         .def_property_readonly(
             "operator_input_signatures",
-            &NativeCounterProbe::operator_input_signatures
+            &NativeCounter::operator_input_signatures
         )
-        .def_property_readonly("operator_flops", &NativeCounterProbe::operator_flops)
-        .def_property_readonly("operator_bops", &NativeCounterProbe::operator_bops)
-        .def_property_readonly("operator_errors", &NativeCounterProbe::operator_errors)
+        .def_property_readonly("operator_flops", &NativeCounter::operator_flops)
+        .def_property_readonly("operator_bops", &NativeCounter::operator_bops)
+        .def_property_readonly("operator_errors", &NativeCounter::operator_errors)
         .def_property_readonly(
             "supported_operators",
-            &NativeCounterProbe::supported_operators
+            &NativeCounter::supported_operators
         )
         .def(
             "__enter__",
-            [](NativeCounterProbe& self) -> NativeCounterProbe& {
+            [](NativeCounter& self) -> NativeCounter& {
                 self.start();
                 return self;
             },
@@ -587,7 +587,7 @@ void bind_native_counter(py::module_& module) {
         .def(
             "__exit__",
             [](
-                NativeCounterProbe& self,
+                NativeCounter& self,
                 const py::object&,
                 const py::object&,
                 const py::object&
