@@ -26,37 +26,43 @@ class NativeCounterProbe;
 
 thread_local NativeCounterProbe* tls_active_probe = nullptr;
 
-/**
- * Probe nativo utilizzato per intercettare gli operatori
- * ATen e accumularne i FLOP.
- */
+class NativeCounterObserverContext final
+    : public at::ObserverContext {
+public:
+    NativeCounterObserverContext(
+        NativeCounterProbe* probe,
+        bool entered_canonical_scope
+    )
+        : probe_(probe),
+          entered_canonical_scope_(entered_canonical_scope) {
+    }
+
+    NativeCounterProbe* probe() const {
+        return probe_;
+    }
+
+    bool entered_canonical_scope() const {
+        return entered_canonical_scope_;
+    }
+
+private:
+    NativeCounterProbe* probe_ = nullptr;
+    bool entered_canonical_scope_ = false;
+};
+
 class NativeCounterProbe {
 public:
     NativeCounterProbe() = default;
 
-    NativeCounterProbe(
-        const NativeCounterProbe&
-    ) = delete;
-
-    NativeCounterProbe& operator=(
-        const NativeCounterProbe&
-    ) = delete;
-
-    NativeCounterProbe(
-        NativeCounterProbe&&
-    ) = delete;
-
-    NativeCounterProbe& operator=(
-        NativeCounterProbe&&
-    ) = delete;
+    NativeCounterProbe(const NativeCounterProbe&) = delete;
+    NativeCounterProbe& operator=(const NativeCounterProbe&) = delete;
+    NativeCounterProbe(NativeCounterProbe&&) = delete;
+    NativeCounterProbe& operator=(NativeCounterProbe&&) = delete;
 
     ~NativeCounterProbe() {
         stop_noexcept();
     }
 
-    /**
-     * Avvia l'intercettazione nel thread corrente.
-     */
     void start() {
         if (active_) {
             throw std::runtime_error(
@@ -66,22 +72,21 @@ public:
 
         if (tls_active_probe != nullptr) {
             throw std::runtime_error(
-                "Another NativeCounterProbe is already "
-                "active in the current thread."
+                "Another NativeCounterProbe is already active "
+                "in the current thread."
             );
         }
 
-        paused_.store(
-            false,
-            std::memory_order_relaxed
-        );
+        paused_.store(false, std::memory_order_relaxed);
+        canonical_scope_stack_.clear();
 
         tls_active_probe = this;
         active_ = true;
 
         try {
             at::RecordFunctionCallback callback(
-                &NativeCounterProbe::on_function_start
+                &NativeCounterProbe::on_function_start,
+                &NativeCounterProbe::on_function_end
             );
 
             callback
@@ -90,9 +95,7 @@ public:
                 .needsIds(false)
                 .samplingProb(1.0)
                 .scopes(
-                    std::unordered_set<
-                        at::RecordScope
-                    >{
+                    std::unordered_set<at::RecordScope>{
                         at::RecordScope::FUNCTION
                     }
                 );
@@ -104,40 +107,25 @@ public:
         }
         catch (...) {
             active_ = false;
+            canonical_scope_stack_.clear();
             tls_active_probe = nullptr;
-
-            callback_handle_ =
-                at::INVALID_CALLBACK_HANDLE;
-
+            callback_handle_ = at::INVALID_CALLBACK_HANDLE;
             throw;
         }
     }
 
-    /**
-     * Interrompe l'intercettazione.
-     */
     void stop() {
         if (!active_) {
             return;
         }
 
-        if (
-            callback_handle_ !=
-            at::INVALID_CALLBACK_HANDLE
-        ) {
-            at::removeCallback(
-                callback_handle_
-            );
-
-            callback_handle_ =
-                at::INVALID_CALLBACK_HANDLE;
+        if (callback_handle_ != at::INVALID_CALLBACK_HANDLE) {
+            at::removeCallback(callback_handle_);
+            callback_handle_ = at::INVALID_CALLBACK_HANDLE;
         }
 
-        paused_.store(
-            false,
-            std::memory_order_relaxed
-        );
-
+        paused_.store(false, std::memory_order_relaxed);
+        canonical_scope_stack_.clear();
         active_ = false;
 
         if (tls_active_probe == this) {
@@ -145,30 +133,13 @@ public:
         }
     }
 
-    /**
-     * Azzera tutti i dati raccolti.
-     */
     void reset() {
-        event_count_.store(
-            0,
-            std::memory_order_relaxed
-        );
+        event_count_.store(0, std::memory_order_relaxed);
+        total_flops_.store(0, std::memory_order_relaxed);
+        total_bops_.store(0, std::memory_order_relaxed);
+        paused_.store(false, std::memory_order_relaxed);
 
-        total_flops_.store(
-            0,
-            std::memory_order_relaxed
-        );
-
-        total_bops_.store(
-            0,
-            std::memory_order_relaxed
-        );
-
-        paused_.store(
-            false,
-            std::memory_order_relaxed
-        );
-
+        canonical_scope_stack_.clear();
         operator_counts_.clear();
         operator_input_signatures_.clear();
         operator_flops_.clear();
@@ -176,36 +147,17 @@ public:
         operator_errors_.clear();
     }
 
-    /**
-     * Sospende temporaneamente il conteggio.
-     */
     void pause() {
-        paused_.store(
-            true,
-            std::memory_order_relaxed
-        );
+        paused_.store(true, std::memory_order_relaxed);
     }
 
-    /**
-     * Riprende il conteggio dopo una pausa.
-     */
     void resume() {
-        paused_.store(
-            false,
-            std::memory_order_relaxed
-        );
+        paused_.store(false, std::memory_order_relaxed);
     }
 
-    /**
-     * Aggiunge un contributo FLOP calcolato esternamente.
-     */
-    void add_flops(
-        const std::uint64_t value
-    ) {
+    void add_flops(std::uint64_t value) {
         const std::uint64_t current =
-            total_flops_.load(
-                std::memory_order_relaxed
-            );
+            total_flops_.load(std::memory_order_relaxed);
 
         total_flops_.store(
             checked_add(current, value),
@@ -213,16 +165,9 @@ public:
         );
     }
 
-    /**
-     * Aggiunge un contributo BOP calcolato esternamente.
-     */
-    void add_bops(
-        const std::uint64_t value
-    ) {
+    void add_bops(std::uint64_t value) {
         const std::uint64_t current =
-            total_bops_.load(
-                std::memory_order_relaxed
-            );
+            total_bops_.load(std::memory_order_relaxed);
 
         total_bops_.store(
             checked_add(current, value),
@@ -235,65 +180,42 @@ public:
     }
 
     bool paused() const {
-        return paused_.load(
-            std::memory_order_relaxed
-        );
+        return paused_.load(std::memory_order_relaxed);
     }
 
     std::uint64_t event_count() const {
-        return event_count_.load(
-            std::memory_order_relaxed
-        );
+        return event_count_.load(std::memory_order_relaxed);
     }
 
     std::uint64_t total_flops() const {
-        return total_flops_.load(
-            std::memory_order_relaxed
-        );
+        return total_flops_.load(std::memory_order_relaxed);
     }
 
     std::uint64_t total_bops() const {
-        return total_bops_.load(
-            std::memory_order_relaxed
-        );
+        return total_bops_.load(std::memory_order_relaxed);
     }
 
-    std::unordered_map<
-        std::string,
-        std::uint64_t
-    >
+    std::unordered_map<std::string, std::uint64_t>
     operator_counts() const {
         return operator_counts_;
     }
 
-    std::unordered_map<
-        std::string,
-        std::string
-    >
+    std::unordered_map<std::string, std::string>
     operator_input_signatures() const {
         return operator_input_signatures_;
     }
 
-    std::unordered_map<
-        std::string,
-        std::uint64_t
-    >
+    std::unordered_map<std::string, std::uint64_t>
     operator_flops() const {
         return operator_flops_;
     }
 
-    std::unordered_map<
-        std::string,
-        std::uint64_t
-    >
+    std::unordered_map<std::string, std::uint64_t>
     operator_bops() const {
         return operator_bops_;
     }
 
-    std::unordered_map<
-        std::string,
-        std::string
-    >
+    std::unordered_map<std::string, std::string>
     operator_errors() const {
         return operator_errors_;
     }
@@ -305,18 +227,101 @@ public:
     }
 
 private:
-    /**
-     * Callback richiamata all'inizio di ogni operatore
-     * intercettato da RecordFunction.
-     */
-    static std::unique_ptr<
-        at::ObserverContext
-    >
+    struct CanonicalScopeState {
+        bool has_contribution = false;
+    };
+
+    static bool opens_canonical_scope(
+        const std::string& operator_name
+    ) {
+        static const std::unordered_set<std::string>
+            canonical_scope_operators = {
+                "aten::adaptive_avg_pool1d",
+                "aten::adaptive_avg_pool2d",
+                "aten::adaptive_avg_pool3d",
+
+                "aten::upsample_nearest1d",
+                "aten::_upsample_nearest_exact1d",
+                "aten::upsample_linear1d",
+                "aten::upsample_nearest2d",
+                "aten::_upsample_nearest_exact2d",
+                "aten::upsample_bilinear2d",
+                "aten::_upsample_bilinear2d_aa",
+                "aten::upsample_bicubic2d",
+                "aten::upsample_nearest3d",
+                "aten::_upsample_nearest_exact3d",
+                "aten::upsample_trilinear3d",
+
+                "aten::sort",
+                "aten::argsort",
+
+                "aten::embedding",
+
+                "aten::sub_",
+                "aten::exp_",
+                "aten::log_",
+                "aten::pow_",
+                "aten::neg_",
+                "aten::abs_",
+                "aten::relu_",
+                "aten::sigmoid_",
+                "aten::tanh_",
+                "aten::sqrt_",
+                "aten::rsqrt_",
+                "aten::gelu_",
+                "aten::silu_",
+                "aten::mish_",
+
+                "aten::_foreach_add",
+                "aten::_foreach_add_",
+                "aten::_foreach_sub",
+                "aten::_foreach_sub_",
+                "aten::_foreach_mul",
+                "aten::_foreach_mul_",
+                "aten::_foreach_div",
+                "aten::_foreach_div_",
+                "aten::_foreach_sqrt",
+                "aten::_foreach_sqrt_",
+                "aten::_foreach_exp",
+                "aten::_foreach_exp_",
+                "aten::_foreach_neg",
+                "aten::_foreach_neg_",
+                "aten::_foreach_addcmul",
+                "aten::_foreach_addcmul_",
+                "aten::_foreach_addcdiv",
+                "aten::_foreach_addcdiv_",
+
+                "aten::rnn_tanh",
+                "aten::rnn_relu",
+                "aten::gru",
+                "aten::lstm"
+            };
+
+        return canonical_scope_operators.find(operator_name) !=
+               canonical_scope_operators.end();
+    }
+
+    bool canonical_ancestor_has_contribution() const {
+        for (const CanonicalScopeState& state : canonical_scope_stack_) {
+            if (state.has_contribution) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    void mark_canonical_scopes_contributed() {
+        for (CanonicalScopeState& state : canonical_scope_stack_) {
+            state.has_contribution = true;
+        }
+    }
+
+    static std::unique_ptr<at::ObserverContext>
     on_function_start(
         const at::RecordFunction& function
     ) {
-        NativeCounterProbe* probe =
-            tls_active_probe;
+        NativeCounterProbe* probe = tls_active_probe;
 
         if (
             probe == nullptr ||
@@ -326,20 +331,78 @@ private:
             return nullptr;
         }
 
-        probe->record_function(function);
+        const char* raw_name = function.name();
 
-        return nullptr;
+        const std::string operator_name =
+            raw_name != nullptr
+                ? std::string(raw_name)
+                : std::string("<unnamed>");
+
+        const bool enters_canonical_scope =
+            opens_canonical_scope(operator_name);
+
+        bool suppress_flop_calculation = false;
+
+        if (!probe->canonical_scope_stack_.empty()) {
+            suppress_flop_calculation =
+                !enters_canonical_scope ||
+                probe->canonical_ancestor_has_contribution();
+        }
+
+        const bool contributed =
+            probe->record_function(
+                function,
+                suppress_flop_calculation
+            );
+
+        if (contributed) {
+            probe->mark_canonical_scopes_contributed();
+        }
+
+        if (enters_canonical_scope) {
+            probe->canonical_scope_stack_.push_back(
+                CanonicalScopeState{contributed}
+            );
+        }
+
+        return std::make_unique<NativeCounterObserverContext>(
+            probe,
+            enters_canonical_scope
+        );
     }
 
-    /**
-     * Registra l'evento e, quando disponibile, utilizza
-     * il registro per individuarne il calcolatore FLOP.
-     */
-    void record_function(
-        const at::RecordFunction& function
+    static void on_function_end(
+        const at::RecordFunction&,
+        at::ObserverContext* context
     ) {
-        const char* raw_name =
-            function.name();
+        auto* counter_context =
+            dynamic_cast<NativeCounterObserverContext*>(
+                context
+            );
+
+        if (
+            counter_context == nullptr ||
+            !counter_context->entered_canonical_scope()
+        ) {
+            return;
+        }
+
+        NativeCounterProbe* probe =
+            counter_context->probe();
+
+        if (
+            probe != nullptr &&
+            !probe->canonical_scope_stack_.empty()
+        ) {
+            probe->canonical_scope_stack_.pop_back();
+        }
+    }
+
+    bool record_function(
+        const at::RecordFunction& function,
+        bool suppress_flop_calculation
+    ) {
+        const char* raw_name = function.name();
 
         const std::string operator_name =
             raw_name != nullptr
@@ -354,53 +417,43 @@ private:
         ++operator_counts_[operator_name];
 
         try {
-            operator_input_signatures_[
-                operator_name
-            ] = describe_inputs(function);
+            operator_input_signatures_[operator_name] =
+                describe_inputs(function);
         }
         catch (const std::exception& error) {
-            operator_input_signatures_[
-                operator_name
-            ] =
-                std::string(
-                    "<input inspection failed: "
-                )
-                + error.what()
-                + ">";
+            operator_input_signatures_[operator_name] =
+                std::string("<input inspection failed: ") +
+                error.what() +
+                ">";
         }
         catch (...) {
-            operator_input_signatures_[
-                operator_name
-            ] =
+            operator_input_signatures_[operator_name] =
                 "<input inspection failed>";
         }
 
+        if (suppress_flop_calculation) {
+            return false;
+        }
+
         try {
-            const OperatorRegistry& registry =
-                OperatorRegistry::instance();
-
             const FlopCalculator calculator =
-                registry.find(operator_name);
+                OperatorRegistry::instance().find(
+                    operator_name
+                );
 
-            /*
-             * L'operatore è stato osservato, ma non dispone
-             * ancora di un calcolatore FLOP.
-             */
             if (calculator == nullptr) {
-                return;
+                return false;
             }
 
             const std::uint64_t flops =
                 calculator(function);
 
             if (flops == 0) {
-                return;
+                return false;
             }
 
             const std::uint64_t bit_width =
-                get_effective_bit_width(
-                    function
-                );
+                get_effective_bit_width(function);
 
             const std::uint64_t bops =
                 checked_multiply(
@@ -410,22 +463,20 @@ private:
 
             operator_flops_[operator_name] =
                 checked_add(
-                    operator_flops_[
-                        operator_name
-                    ],
+                    operator_flops_[operator_name],
                     flops
                 );
 
             operator_bops_[operator_name] =
                 checked_add(
-                    operator_bops_[
-                        operator_name
-                    ],
+                    operator_bops_[operator_name],
                     bops
                 );
 
             add_flops(flops);
             add_bops(bops);
+
+            return true;
         }
         catch (const std::exception& error) {
             operator_errors_[operator_name] =
@@ -435,40 +486,26 @@ private:
             operator_errors_[operator_name] =
                 "Unknown FLOP calculation error.";
         }
+
+        return false;
     }
 
-    /**
-     * Versione noexcept di stop(), utilizzata dal distruttore.
-     */
     void stop_noexcept() noexcept {
         if (!active_) {
             return;
         }
 
         try {
-            if (
-                callback_handle_ !=
-                at::INVALID_CALLBACK_HANDLE
-            ) {
-                at::removeCallback(
-                    callback_handle_
-                );
+            if (callback_handle_ != at::INVALID_CALLBACK_HANDLE) {
+                at::removeCallback(callback_handle_);
             }
         }
         catch (...) {
-            /*
-             * Un distruttore non deve propagare eccezioni.
-             */
         }
 
-        callback_handle_ =
-            at::INVALID_CALLBACK_HANDLE;
-
-        paused_.store(
-            false,
-            std::memory_order_relaxed
-        );
-
+        callback_handle_ = at::INVALID_CALLBACK_HANDLE;
+        paused_.store(false, std::memory_order_relaxed);
+        canonical_scope_stack_.clear();
         active_ = false;
 
         if (tls_active_probe == this) {
@@ -478,191 +515,87 @@ private:
 
 private:
     bool active_ = false;
-
-    std::atomic<bool>
-        paused_{false};
+    std::atomic<bool> paused_{false};
 
     at::CallbackHandle callback_handle_ =
         at::INVALID_CALLBACK_HANDLE;
 
-    std::atomic<std::uint64_t>
-        event_count_{0};
+    std::vector<CanonicalScopeState>
+        canonical_scope_stack_;
 
-    std::atomic<std::uint64_t>
-        total_flops_{0};
+    std::atomic<std::uint64_t> event_count_{0};
+    std::atomic<std::uint64_t> total_flops_{0};
+    std::atomic<std::uint64_t> total_bops_{0};
 
-    std::atomic<std::uint64_t>
-        total_bops_{0};
-
-    std::unordered_map<
-        std::string,
-        std::uint64_t
-    >
+    std::unordered_map<std::string, std::uint64_t>
         operator_counts_;
 
-    std::unordered_map<
-        std::string,
-        std::string
-    >
+    std::unordered_map<std::string, std::string>
         operator_input_signatures_;
 
-    std::unordered_map<
-        std::string,
-        std::uint64_t
-    >
+    std::unordered_map<std::string, std::uint64_t>
         operator_flops_;
 
-    std::unordered_map<
-        std::string,
-        std::uint64_t
-    >
+    std::unordered_map<std::string, std::uint64_t>
         operator_bops_;
 
-    std::unordered_map<
-        std::string,
-        std::string
-    >
+    std::unordered_map<std::string, std::string>
         operator_errors_;
 };
 
-void bind_native_counter(
-    py::module_& module
-) {
+void bind_native_counter(py::module_& module) {
     module.doc() =
-            "Native proof-of-concept FLOP counter "
-            "for PyTorch ATen operators.";
+        "Native FLOP and BOP counter for PyTorch ATen operators.";
 
-        py::class_<NativeCounterProbe>(
-            module,
-            "NativeCounterProbe"
+    py::class_<NativeCounterProbe>(
+        module,
+        "NativeCounterProbe"
+    )
+        .def(py::init<>())
+        .def("start", &NativeCounterProbe::start)
+        .def("stop", &NativeCounterProbe::stop)
+        .def("reset", &NativeCounterProbe::reset)
+        .def("pause", &NativeCounterProbe::pause)
+        .def("resume", &NativeCounterProbe::resume)
+        .def("add_flops", &NativeCounterProbe::add_flops)
+        .def("add_bops", &NativeCounterProbe::add_bops)
+        .def_property_readonly("active", &NativeCounterProbe::active)
+        .def_property_readonly("paused", &NativeCounterProbe::paused)
+        .def_property_readonly("event_count", &NativeCounterProbe::event_count)
+        .def_property_readonly("total_flops", &NativeCounterProbe::total_flops)
+        .def_property_readonly("total_bops", &NativeCounterProbe::total_bops)
+        .def_property_readonly("operator_counts", &NativeCounterProbe::operator_counts)
+        .def_property_readonly(
+            "operator_input_signatures",
+            &NativeCounterProbe::operator_input_signatures
         )
-            .def(py::init<>())
-
-            .def(
-                "start",
-                &NativeCounterProbe::start,
-                "Start intercepting ATen operators."
-            )
-
-            .def(
-                "stop",
-                &NativeCounterProbe::stop,
-                "Stop intercepting ATen operators."
-            )
-
-            .def(
-                "reset",
-                &NativeCounterProbe::reset,
-                "Reset all collected data."
-            )
-
-            .def(
-                "pause",
-                &NativeCounterProbe::pause,
-                "Temporarily pause operator counting."
-            )
-
-            .def(
-                "resume",
-                &NativeCounterProbe::resume,
-                "Resume operator counting."
-            )
-
-            .def(
-                "add_flops",
-                &NativeCounterProbe::add_flops,
-                "Add a manually calculated FLOP contribution."
-            )
-
-            .def(
-                "add_bops",
-                &NativeCounterProbe::add_bops,
-                "Add a manually calculated BOP contribution."
-            )
-
-            .def_property_readonly(
-                "active",
-                &NativeCounterProbe::active
-            )
-
-            .def_property_readonly(
-                "paused",
-                &NativeCounterProbe::paused
-            )
-
-            .def_property_readonly(
-                "event_count",
-                &NativeCounterProbe::event_count
-            )
-
-            .def_property_readonly(
-                "total_flops",
-                &NativeCounterProbe::total_flops
-            )
-
-            .def_property_readonly(
-                "total_bops",
-                &NativeCounterProbe::total_bops
-            )
-
-            .def_property_readonly(
-                "operator_counts",
-                &NativeCounterProbe::operator_counts
-            )
-
-            .def_property_readonly(
-                "operator_input_signatures",
-                &NativeCounterProbe::
-                    operator_input_signatures
-            )
-
-            .def_property_readonly(
-                "operator_flops",
-                &NativeCounterProbe::operator_flops
-            )
-
-            .def_property_readonly(
-                "operator_bops",
-                &NativeCounterProbe::operator_bops
-            )
-
-            .def_property_readonly(
-                "operator_errors",
-                &NativeCounterProbe::operator_errors
-            )
-
-            .def_property_readonly(
-                "supported_operators",
-                &NativeCounterProbe::
-                    supported_operators
-            )
-
-            .def(
-                "__enter__",
-                [](
-                    NativeCounterProbe& self
-                ) -> NativeCounterProbe& {
-                    self.start();
-
-                    return self;
-                },
-                py::return_value_policy::
-                    reference_internal
-            )
-
-            .def(
-                "__exit__",
-                [](
-                    NativeCounterProbe& self,
-                    const py::object&,
-                    const py::object&,
-                    const py::object&
-                ) {
-                    self.stop();
-
-                    return false;
-                }
-            );
+        .def_property_readonly("operator_flops", &NativeCounterProbe::operator_flops)
+        .def_property_readonly("operator_bops", &NativeCounterProbe::operator_bops)
+        .def_property_readonly("operator_errors", &NativeCounterProbe::operator_errors)
+        .def_property_readonly(
+            "supported_operators",
+            &NativeCounterProbe::supported_operators
+        )
+        .def(
+            "__enter__",
+            [](NativeCounterProbe& self) -> NativeCounterProbe& {
+                self.start();
+                return self;
+            },
+            py::return_value_policy::reference_internal
+        )
+        .def(
+            "__exit__",
+            [](
+                NativeCounterProbe& self,
+                const py::object&,
+                const py::object&,
+                const py::object&
+            ) {
+                self.stop();
+                return false;
+            }
+        );
 }
 
 }  // namespace floppy::native

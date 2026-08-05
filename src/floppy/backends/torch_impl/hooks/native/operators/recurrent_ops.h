@@ -1,14 +1,12 @@
 #pragma once
+
 #include <ATen/record_function.h>
+
 #include <cstdint>
 
 namespace floppy::native {
 
-std::uint64_t calculate_mse_loss_flops(
-    const at::RecordFunction& function
-);
-
-std::uint64_t calculate_nll_loss_forward_flops(
+std::uint64_t calculate_recurrent_flops(
     const at::RecordFunction& function
 );
 

@@ -4,11 +4,11 @@
 
 namespace floppy::native {
 
-std::uint64_t calculate_mse_loss_flops(
+std::uint64_t calculate_native_layer_norm_flops(
     const at::RecordFunction& function
 );
 
-std::uint64_t calculate_nll_loss_forward_flops(
+std::uint64_t calculate_softmax_flops(
     const at::RecordFunction& function
 );
 
