@@ -4,6 +4,7 @@
 
 #include <ATen/ATen.h>
 
+#include <cstddef>
 #include <cstdint>
 
 namespace floppy::native {
@@ -16,21 +17,12 @@ at::Tensor tensor_input_at(
 ) {
     const auto inputs = function.inputs();
 
-    if (
-        index >= inputs.size() ||
-        !inputs[index].isTensor()
-    ) {
+    if (index >= inputs.size() || !inputs[index].isTensor()) {
         return {};
     }
 
-    const at::Tensor tensor =
-        inputs[index].toTensor();
-
-    if (!tensor.defined()) {
-        return {};
-    }
-
-    return tensor;
+    const at::Tensor tensor = inputs[index].toTensor();
+    return tensor.defined() ? tensor : at::Tensor{};
 }
 
 }  // namespace
@@ -38,62 +30,69 @@ at::Tensor tensor_input_at(
 std::uint64_t calculate_destination_indexing_flops(
     const at::RecordFunction& function
 ) {
-    /*
-     * scatter, scatter_add, scatter_reduce e index_add
-     * restituiscono un tensore con la stessa forma del
-     * tensore destinazione, presente in posizione 0.
-     */
-    const at::Tensor destination =
-        tensor_input_at(function, 0);
+    const at::Tensor destination = tensor_input_at(function, 0);
+    return destination.defined() ? tensor_numel(destination) : 0;
+}
 
-    if (!destination.defined()) {
+std::uint64_t calculate_index_select_flops(
+    const at::RecordFunction& function
+) {
+    const auto inputs = function.inputs();
+
+    if (
+        inputs.size() < 3 ||
+        !inputs[0].isTensor() ||
+        !inputs[1].isInt() ||
+        !inputs[2].isTensor()
+    ) {
         return 0;
     }
 
-    return tensor_numel(destination);
+    const at::Tensor input = inputs[0].toTensor();
+    const at::Tensor index = inputs[2].toTensor();
+
+    if (!input.defined() || !index.defined() || input.dim() <= 0) {
+        return 0;
+    }
+
+    int64_t dimension = inputs[1].toInt();
+
+    if (dimension < 0) {
+        dimension += input.dim();
+    }
+
+    if (dimension < 0 || dimension >= input.dim()) {
+        return 0;
+    }
+
+    std::uint64_t output_elements = tensor_numel(index);
+
+    for (int64_t current = 0; current < input.dim(); ++current) {
+        if (current == dimension) {
+            continue;
+        }
+
+        output_elements = checked_multiply(
+            output_elements,
+            dimension_to_uint64(input.size(current))
+        );
+    }
+
+    return output_elements;
 }
 
 std::uint64_t calculate_gather_flops(
     const at::RecordFunction& function
 ) {
-    /*
-     * Firma di aten::gather:
-     *
-     * 0: input
-     * 1: dim
-     * 2: index
-     * 3: sparse_grad
-     *
-     * L'output ha la stessa forma di index.
-     */
-    const at::Tensor index =
-        tensor_input_at(function, 2);
-
-    if (!index.defined()) {
-        return 0;
-    }
-
-    return tensor_numel(index);
+    const at::Tensor index = tensor_input_at(function, 2);
+    return index.defined() ? tensor_numel(index) : 0;
 }
 
 std::uint64_t calculate_bincount_flops(
     const at::RecordFunction& function
 ) {
-    /*
-     * Firma di aten::bincount:
-     *
-     * 0: input
-     * 1: weights oppure None
-     * 2: minlength
-     */
-    const at::Tensor input =
-        tensor_input_at(function, 0);
-
-    if (!input.defined()) {
-        return 0;
-    }
-
-    return tensor_numel(input);
+    const at::Tensor input = tensor_input_at(function, 0);
+    return input.defined() ? tensor_numel(input) : 0;
 }
 
 }  // namespace floppy::native

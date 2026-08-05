@@ -14,13 +14,11 @@ std::uint64_t calculate_upsampling_flops(
     const at::RecordFunction& function
 ) {
     /*
-     * Firma comune osservata:
+     * Common observed signature:
      *
      * 0: input
      * 1: output_size
-     * 2+: parametri specifici della modalità
-     *
-     * Gli operatori coperti sono 1D, 2D e 3D.
+     * 2+: mode-specific parameters
      */
     const auto inputs = function.inputs();
 

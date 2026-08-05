@@ -108,7 +108,7 @@ std::uint64_t calculate_convolution_flops(
     const at::RecordFunction& function
 ) {
     /*
-     * Firma canonica di aten::_convolution:
+     * Canonical signature of aten::_convolution:
      *
      * 0: input
      * 1: weight
@@ -268,7 +268,7 @@ std::uint64_t calculate_convolution_flops(
 
     if (!transposed) {
         /*
-         * Peso standard:
+         * Standard weight:
          * [out_channels, in_channels / groups, kernel...]
          */
         const std::uint64_t
@@ -323,7 +323,7 @@ std::uint64_t calculate_convolution_flops(
     }
     else {
         /*
-         * Peso trasposto:
+         * Transposed weight:
          * [in_channels, out_channels / groups, kernel...]
          */
         const std::uint64_t

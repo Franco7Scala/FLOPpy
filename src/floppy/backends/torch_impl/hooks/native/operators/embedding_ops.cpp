@@ -12,7 +12,7 @@ std::uint64_t calculate_embedding_flops(
     const at::RecordFunction& function
 ) {
     /*
-     * Firma di aten::embedding:
+     * Signature of aten::embedding:
      *
      * 0: weight
      * 1: indices

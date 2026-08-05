@@ -42,12 +42,12 @@ std::uint64_t calculate_optimizer_unary_inplace_flops(
     }
 
     /*
-     * Ignora le operazioni in-place su tensori scalari.
+     * Ignores in-place operations on scalar tensors.
      *
-     * PyTorch utilizza div_ su scalari come dettaglio interno di alcune riduzioni, per esempio MSELoss(mean). 
-     * Il costo della riduzione è già incluso nel calcolatore canonico aten::mse_loss e non deve essere contato 
-     * due volte.
-     * Le operazioni optimizer reali osservate su mul_ e div_ lavorano invece sui tensori dei parametri.
+     * PyTorch uses div_ on scalars as an internal implementation detail of certain reductions,
+     * such as MSELoss(mean). The reduction cost is already included in the canonical aten::mse_loss
+calculator and must not be double counted.
+     * Real optimizer operations observed on mul_ and div_, on the other hand, operate on parameter tensors.
      */
     if (input.dim() == 0) {
         return 0;

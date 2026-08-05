@@ -7,9 +7,7 @@
 namespace floppy::native {
 
 /**
- * Calcola il costo legacy FLOPpy degli operatori di upsampling.
- *
- * Convenzione:
+ * Computes the legacy FLOPpy cost for upsampling operations.
  *
  * FLOP = 4 * numero_elementi_output
  */

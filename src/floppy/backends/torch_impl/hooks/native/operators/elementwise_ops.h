@@ -22,4 +22,20 @@ std::uint64_t calculate_add_inplace_flops(
     const at::RecordFunction& function
 );
 
+std::uint64_t calculate_inplace_elementwise_flops(
+    const at::RecordFunction& function
+);
+
+std::uint64_t calculate_complex_elementwise_flops(
+    const at::RecordFunction& function
+);
+
+std::uint64_t calculate_foreach_elementwise_flops(
+    const at::RecordFunction& function
+);
+
+std::uint64_t calculate_foreach_complex_flops(
+    const at::RecordFunction& function
+);
+
 }  // namespace floppy::native

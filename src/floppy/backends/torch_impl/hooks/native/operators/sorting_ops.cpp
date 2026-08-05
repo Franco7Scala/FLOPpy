@@ -52,7 +52,7 @@ std::uint64_t calculate_sorting_flops(
         ) * logarithm;
 
     /*
-     * Mantiene la stessa conversione tronca del core legacy.
+     * Historical FLOPpy convention:
      */
     return static_cast<std::uint64_t>(
         estimated_flops

@@ -7,18 +7,18 @@
 namespace floppy::native {
 
 /**
- * Costo legacy FLOPpy per pooling:
+ * Legacy FLOPpy pooling cost:
  *
- * FLOP = numero di elementi dell'output.
+ * FLOP = number of output elements.
  */
 std::uint64_t calculate_pooling_flops(
     const at::RecordFunction& function
 );
 
 /**
- * Costo legacy FLOPpy per adaptive average pooling:
+ * Legacy FLOPpy cost for adaptive average pooling:
  *
- * FLOP = numero di elementi dell'output.
+ * FLOP = number of output elements.
  */
 std::uint64_t calculate_adaptive_avg_pooling_flops(
     const at::RecordFunction& function

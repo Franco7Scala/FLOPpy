@@ -56,10 +56,6 @@ std::uint64_t calculate_output_dimension(
             numerator / stride + 1;
     }
 
-    /*
-     * Correzione coerente con il comportamento di PyTorch:
-     * l'ultima finestra non deve iniziare interamente nel padding.
-     */
     if (
         ceil_mode &&
         (output_size - 1) * stride >= input_size + padding
@@ -108,7 +104,7 @@ std::uint64_t calculate_pooling_flops(
     const at::RecordFunction& function
 ) {
     /*
-     * Firme coperte:
+     * Supported signatures
      *
      * max_pool1d
      * max_pool2d_with_indices
@@ -281,7 +277,7 @@ std::uint64_t calculate_adaptive_avg_pooling_flops(
     const at::RecordFunction& function
 ) {
     /*
-     * Firma:
+     * Signature:
      *
      * 0: input
      * 1: output_size

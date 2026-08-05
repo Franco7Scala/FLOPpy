@@ -7,9 +7,7 @@
 namespace floppy::native {
 
 /**
- * Calcola il costo legacy FLOPpy per topk, sort e argsort.
- *
- * Formula:
+ * Computes the legacy FLOPpy cost for topk, sort, and argsort.
  *
  * numel(input) * log2(max(2, numel(input)))
  */

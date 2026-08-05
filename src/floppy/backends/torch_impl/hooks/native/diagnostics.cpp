@@ -9,12 +9,7 @@
 namespace floppy::native {
 
 /**
- * Restituisce una descrizione leggibile della forma
- * di un tensore.
- *
- * Esempio:
- *
- * Tensor(shape=(10, 20))
+ * Returns a human-readable description of the shape of a tensor.
  */
 static std::string describe_tensor(
     const at::Tensor& tensor
@@ -51,8 +46,7 @@ static std::string describe_tensor(
 }
 
 /**
- * Restituisce una descrizione leggibile di una lista
- * di interi contenuta in un IValue.
+ * Returns a human-readable description of a list of integers.
  */
 static std::string describe_int_list(
     const c10::IValue& value
@@ -82,7 +76,7 @@ static std::string describe_int_list(
 }
 
 /**
- * Restituisce una descrizione leggibile di un IValue.
+ * Returns a human-readable description of an IValue.
  */
 static std::string describe_value(
     const c10::IValue& value
@@ -172,7 +166,7 @@ static std::string describe_value(
 }
 
 /**
- * Descrive tutti gli input dell'operatore intercettato.
+ * Returns a human-readable description of all inputs of the intercepted operator.
  */
 std::string describe_inputs(
     const at::RecordFunction& function

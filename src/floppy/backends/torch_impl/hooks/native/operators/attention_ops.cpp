@@ -12,7 +12,7 @@ std::uint64_t calculate_flash_attention_flops(
     const at::RecordFunction& function
 ) {
     /*
-     * Firma osservata di
+     * Observed signature of
      * aten::_scaled_dot_product_flash_attention:
      *
      * 0: query  [batch, heads, query_length, query_dim]
@@ -81,7 +81,7 @@ std::uint64_t calculate_flash_attention_flops(
         dimension_to_uint64(value.size(3));
 
     /*
-     * Verifica compatibilità delle forme.
+     * Checks shape compatibility
      */
     if (
         dimension_to_uint64(key.size(0)) != batch ||
@@ -126,8 +126,7 @@ std::uint64_t calculate_flash_attention_flops(
      * Softmax:
      * 3 * B * H * Lq * Lk
      *
-     * Mantiene la convenzione della precedente
-     * implementazione FLOPpy.
+     *Maintains the convention of the previous FLOPpy implementation
      */
     const std::uint64_t softmax_flops =
         checked_multiply(

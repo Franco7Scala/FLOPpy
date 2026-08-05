@@ -7,15 +7,14 @@
 namespace floppy::native {
 
 /**
- * Calcola il costo storico FLOPpy di aten::embedding.
+ * Computes the historical FLOPpy cost of aten::embedding.
  *
- * Convenzione legacy:
+ * Legacy convention:
  *
- * FLOP = numero_indici * dimensione_embedding
+ * FLOP = number_of_indices * embedding_dimension
  *
- * Nota: si tratta di una metrica di costo mantenuta per
- * compatibilità con la precedente implementazione, anche se
- * l'embedding è principalmente un'operazione di lookup/memoria.
+ * This is a cost metric maintained for compatibility with the previous implementation, even though
+ * embedding is primarily a lookup/memory operation.
  */
 std::uint64_t calculate_embedding_flops(
     const at::RecordFunction& function

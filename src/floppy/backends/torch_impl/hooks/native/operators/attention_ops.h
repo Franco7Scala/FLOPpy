@@ -7,13 +7,11 @@
 namespace floppy::native {
 
 /**
- * Calcola i FLOP di aten::_scaled_dot_product_flash_attention.
+ * Calculates the FLOPs of aten::_scaled_dot_product_flash_attention.
  *
- * Il wrapper aten::scaled_dot_product_attention non viene
- * conteggiato, così da evitare duplicazioni.
+ * The wrapper aten::scaled_dot_product_attention is not counted, to avoid duplicates.
  *
- * I backend matematici decomposti continuano invece a essere
- * conteggiati tramite bmm, softmax e operatori element-wise.
+ * Decomposed math backends are still counted via bmm, softmax, and element-wise operators
  */
 std::uint64_t calculate_flash_attention_flops(
     const at::RecordFunction& function
