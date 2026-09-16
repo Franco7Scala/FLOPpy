@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Any, Callable, Optional
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, LogisticRegression, SGDClassifier, SGDRegressor
+from sklearn.multioutput import MultiOutputClassifier, MultiOutputRegressor
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
@@ -90,17 +91,12 @@ class SklearnBackend(BaseBackend):
     def _wrap_predict(self, fn: Callable) -> Callable:
         def wrapped(X, *args, **kwargs):
             y_pred = fn(X, *args, **kwargs)
-            try:
-                x_arr = np.asarray(X)
-                flop = self._estimate_predict_flop(x_arr, np.asarray(y_pred))
-                bit_width = self._get_numpy_bit_width(x_arr)
-                bops = int(flop * bit_width)
-                # 'predict' is inference, so we map it to Forward metrics
-                self._accumulate_call(flop, bops, is_training=False)
-
-            except Exception as e:
-                pass
-
+            x_arr = np.asarray(X)
+            flop = self._estimate_predict_flop(x_arr, np.asarray(y_pred))
+            bit_width = self._get_numpy_bit_width(x_arr)
+            bops = int(flop * bit_width)
+            # 'predict' is inference, so we map it to Forward metrics
+            self._accumulate_call(flop, bops, is_training=False)
             return y_pred
 
         return wrapped
@@ -108,16 +104,11 @@ class SklearnBackend(BaseBackend):
     def _wrap_predict_proba(self, fn: Callable) -> Callable:
         def wrapped(X, *args, **kwargs):
             proba = fn(X, *args, **kwargs)
-            try:
-                x_arr = np.asarray(X)
-                flop = self._estimate_predict_flop(x_arr, np.asarray(proba))
-                bit_width = self._get_numpy_bit_width(x_arr)
-                bops = int(flop * bit_width)
-                self._accumulate_call(flop, bops, is_training=False)
-
-            except Exception as e:
-                pass
-
+            x_arr = np.asarray(X)
+            flop = self._estimate_predict_flop(x_arr, np.asarray(proba))
+            bit_width = self._get_numpy_bit_width(x_arr)
+            bops = int(flop * bit_width)
+            self._accumulate_call(flop, bops, is_training=False)
             return proba
 
         return wrapped
@@ -125,15 +116,11 @@ class SklearnBackend(BaseBackend):
     def _wrap_transform(self, fn: Callable) -> Callable:
         def wrapped(X, *args, **kwargs):
             z = fn(X, *args, **kwargs)
-            try:
-                x_arr = np.asarray(X)
-                flop = self._estimate_transform_flop(x_arr, np.asarray(z))
-                bit_width = self._get_numpy_bit_width(x_arr)
-                bops = int(flop * bit_width)
-                self._accumulate_call(flop, bops, is_training=False)
-
-            except Exception as e:
-                pass
+            x_arr = np.asarray(X)
+            flop = self._estimate_transform_flop(x_arr, np.asarray(z))
+            bit_width = self._get_numpy_bit_width(x_arr)
+            bops = int(flop * bit_width)
+            self._accumulate_call(flop, bops, is_training=False)
 
             return z
 
@@ -248,54 +235,73 @@ class SklearnBackend(BaseBackend):
     # FLOP estimation
     # ------------------------------------------------------------
 
-    def _estimate_fit_flop(self, X: np.ndarray, y: Any) -> int:
+    def _estimate_fit_flop(self, X: np.ndarray, y: Any, current_model=None) -> int:
         """
         Estimate training FLOPs for common sklearn models.
         """
+        if current_model is None:
+            current_model = self.model
+
         if X.ndim != 2:
-            # FLOP formulas assume standard tabular input (n_samples, n_features).
-            # For non-2D inputs the analytical cost model is not reliable,
-            # so we conservatively return 0.
             return 0
 
         n_samples, n_features = X.shape
-        model = self.model
+
+        # ---------------- Meta Estimator: MultiOutput ---------------- #
+        if isinstance(current_model, (MultiOutputClassifier, MultiOutputRegressor)):
+            if hasattr(current_model, "estimators_"):
+                total_flops = 0
+                for est in current_model.estimators_:
+                    total_flops += self._estimate_fit_flop(X, y, current_model=est)
+
+                return total_flops
+
+            return 0
+
+        # ---------------- XGBoost / LightGBM / CatBoost ---------------- #
+        model_name = current_model.__class__.__name__
+        if "XGB" in model_name or "LGBM" in model_name or "CatBoost" in model_name:
+            n_trees = getattr(current_model, "n_estimators", 100)
+            depth = getattr(current_model, "max_depth", 6)
+            if depth is None or depth <= 0:
+                depth = 6
+
+            flop = n_trees * n_samples * n_features * depth * np.log2(max(n_samples, 2))
+            return int(flop)
 
         # ---------------- LinearRegression ---------------- #
-        if isinstance(model, LinearRegression):
+        if isinstance(current_model, LinearRegression):
             flop = 2 * n_samples * (n_features ** 2) + (2 / 3) * (n_features ** 3)
             return int(flop)
 
         # ---------------- Ridge / Lasso ---------------- #
-        if isinstance(model, (Ridge, Lasso)):
-            iters = self._resolve_effective_iterations(model, n_samples)
+        if isinstance(current_model, (Ridge, Lasso)):
+            iters = self._resolve_effective_iterations(current_model, n_samples)
             flop = iters * n_samples * n_features
             return int(flop)
 
         # ---------------- LogisticRegression ---------------- #
-        if isinstance(model, LogisticRegression):
-            iters = self._resolve_effective_iterations(model, n_samples)
+        if isinstance(current_model, LogisticRegression):
+            iters = self._resolve_effective_iterations(current_model, n_samples)
             n_classes = len(np.unique(y)) if y is not None else 1
             flop = iters * n_samples * n_features * max(n_classes, 1)
             return int(flop)
 
         # ---------------- SGDClassifier / SGDRegressor ---------------- #
-        if isinstance(model, (SGDClassifier, SGDRegressor)):
-            iters = self._resolve_effective_iterations(model, n_samples)
-
-            if y is not None and isinstance(model, SGDClassifier):
+        if isinstance(current_model, (SGDClassifier, SGDRegressor)):
+            iters = self._resolve_effective_iterations(current_model, n_samples)
+            if y is not None and isinstance(current_model, SGDClassifier):
                 n_classes = len(np.unique(y))
+
             else:
                 n_classes = 1
 
-            # t_ already represents update steps, so we do not multiply by n_samples again
             flop = iters * n_features * max(n_classes, 1)
             return int(flop)
 
         # ---------------- KNN ---------------- #
-        if isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
-            algorithm = getattr(model, "algorithm", "auto")
-
+        if isinstance(current_model, (KNeighborsClassifier, KNeighborsRegressor)):
+            algorithm = getattr(current_model, "algorithm", "auto")
             if algorithm == "brute":
                 return int(n_samples * n_features)
 
@@ -305,67 +311,78 @@ class SklearnBackend(BaseBackend):
             return int(n_samples * n_features)
 
         # ---------------- Decision Tree ---------------- #
-        if isinstance(model, (DecisionTreeClassifier, DecisionTreeRegressor)):
+        if isinstance(current_model, (DecisionTreeClassifier, DecisionTreeRegressor)):
             flop = n_samples * n_features * np.log2(max(n_samples, 2))
             return int(flop)
 
         # ---------------- Random Forest ---------------- #
-        if isinstance(model, (RandomForestClassifier, RandomForestRegressor)):
-            n_trees = getattr(model, "n_estimators", 100)
+        if isinstance(current_model, (RandomForestClassifier, RandomForestRegressor)):
+            n_trees = getattr(current_model, "n_estimators", 100)
             flop = n_trees * n_samples * n_features * np.log2(max(n_samples, 2))
             return int(flop)
 
         # ---------------- Linear SVM ---------------- #
-        if isinstance(model, (LinearSVC, LinearSVR)):
-            iters = self._resolve_effective_iterations(model, n_samples)
+        if isinstance(current_model, (LinearSVC, LinearSVR)):
+            iters = self._resolve_effective_iterations(current_model, n_samples)
             flop = iters * n_samples * n_features
             return int(flop)
 
         # ---------------- Kernel SVM ---------------- #
-        if isinstance(model, (SVC, SVR)):
+        if isinstance(current_model, (SVC, SVR)):
             flop = (n_samples ** 2) * n_features
             return int(flop)
 
         # ---------------- KMeans ---------------- #
-        if isinstance(model, KMeans):
-            k = getattr(model, "n_clusters", 8)
-            iters = self._resolve_effective_iterations(model, n_samples)
+        if isinstance(current_model, KMeans):
+            k = getattr(current_model, "n_clusters", 8)
+            iters = self._resolve_effective_iterations(current_model, n_samples)
             flop = iters * n_samples * n_features * k
             return int(flop)
 
-        raise Exception(f"FLOPs estimation not implemented for {model.__class__.__name__} model type!")
+        raise Exception(f"FLOPs estimation not implemented for {current_model.__class__.__name__} model type!")
 
-    def _estimate_predict_flop(self, X: np.ndarray, y: np.ndarray) -> int:
+    def _estimate_predict_flop(self, X: np.ndarray, y: np.ndarray, current_model=None) -> int:
+        if current_model is None:
+            current_model = self.model
+
         if X.ndim != 2:
-            # Predict formulas assume standard tabular input (n_samples, n_features).
             return 0
 
         n_samples, n_features = X.shape
         n_outputs = 1 if y.ndim == 1 else y.shape[1]
-        model = self.model
+
+        # ---------------- Meta Estimator: MultiOutput ---------------- #
+        if isinstance(current_model, (MultiOutputClassifier, MultiOutputRegressor)):
+            if hasattr(current_model, "estimators_"):
+                total_flops = 0
+                for est in current_model.estimators_:
+                    total_flops += self._estimate_predict_flop(X, y, current_model=est)
+
+                return total_flops
+            return 0
+
+        # ---------------- XGBoost / LightGBM / CatBoost ---------------- #
+        model_name = current_model.__class__.__name__
+        if "XGB" in model_name or "LGBM" in model_name or "CatBoost" in model_name:
+            n_trees = getattr(current_model, "n_estimators", 100)
+            depth = getattr(current_model, "max_depth", 6)
+            if depth is None or depth <= 0:
+                depth = self._resolve_tree_depth(current_model, n_samples)
+
+            flop = n_trees * n_samples * depth
+            return int(flop)
 
         # ---------------- Linear / Logistic / SGD ---------------- #
-        if isinstance(
-            model,
-            (
-                LinearRegression,
-                Ridge,
-                Lasso,
-                LogisticRegression,
-                SGDClassifier,
-                SGDRegressor,
-                LinearSVC,
-                LinearSVR,
-            ),
-        ):
+        if isinstance(current_model, (LinearRegression, Ridge, Lasso, LogisticRegression, SGDClassifier, SGDRegressor, LinearSVC, LinearSVR)):
             flop = 2 * n_features * n_outputs * n_samples
             return int(flop)
 
         # ---------------- KNN ---------------- #
-        if isinstance(model, (KNeighborsClassifier, KNeighborsRegressor)):
-            n_train = getattr(model, "n_samples_fit_", None)
-            if n_train is None and hasattr(model, "_fit_X"):
-                n_train = model._fit_X.shape[0]
+        if isinstance(current_model, (KNeighborsClassifier, KNeighborsRegressor)):
+            n_train = getattr(current_model, "n_samples_fit_", None)
+            if n_train is None and hasattr(current_model, "_fit_X"):
+                n_train = current_model._fit_X.shape[0]
+
             if n_train is None:
                 return 0
 
@@ -373,32 +390,32 @@ class SklearnBackend(BaseBackend):
             return int(flop)
 
         # ---------------- Decision Tree predict ---------------- #
-        if isinstance(model, (DecisionTreeClassifier, DecisionTreeRegressor)):
-            depth = self._resolve_tree_depth(model, n_samples)
+        if isinstance(current_model, (DecisionTreeClassifier, DecisionTreeRegressor)):
+            depth = self._resolve_tree_depth(current_model, n_samples)
             flop = n_samples * depth
             return int(flop)
 
         # ---------------- Random Forest predict ---------------- #
-        if isinstance(model, (RandomForestClassifier, RandomForestRegressor)):
-            n_trees = getattr(model, "n_estimators", 100)
-            avg_depth = self._resolve_forest_avg_depth(model, n_samples)
+        if isinstance(current_model, (RandomForestClassifier, RandomForestRegressor)):
+            n_trees = getattr(current_model, "n_estimators", 100)
+            avg_depth = self._resolve_forest_avg_depth(current_model, n_samples)
             flop = n_trees * n_samples * avg_depth
             return int(flop)
 
         # ---------------- Kernel SVM ---------------- #
-        if isinstance(model, (SVC, SVR)):
-            support_vectors = getattr(model, "support_vectors_", None)
+        if isinstance(current_model, (SVC, SVR)):
+            support_vectors = getattr(current_model, "support_vectors_", None)
             n_sv = support_vectors.shape[0] if support_vectors is not None else n_samples
             flop = 2 * n_sv * n_features * n_samples
             return int(flop)
 
         # ---------------- KMeans predict ---------------- #
-        if isinstance(model, KMeans):
-            k = getattr(model, "n_clusters", 8)
+        if isinstance(current_model, KMeans):
+            k = getattr(current_model, "n_clusters", 8)
             flop = 2 * n_samples * n_features * k
             return int(flop)
 
-        raise Exception(f"FLOPs estimation not implemented for {model.__class__.__name__} model type!")
+        raise Exception(f"FLOPs estimation not implemented for {current_model.__class__.__name__} model type!")
 
     def _estimate_transform_flop(self, X: np.ndarray, Z: np.ndarray) -> int:
         """
