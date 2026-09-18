@@ -1,31 +1,32 @@
 # FLOPpy: A hardware-agnostic Python library to monitor the computational cost of Machine and Deep Learning algorithms 
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Version](https://img.shields.io/badge/version-0.1.4-orange.svg)](#)
+[![PyPI Version](https://img.shields.io/pypi/v/floppy-tracker?color=orange&label=version)](https://pypi.org/project/floppy-tracker/)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/floppy-tracker?period=total&units=INTERNATIONAL_SYSTEM&left_color=GREY&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/floppy-tracker)
 
 **FLOPpy** is a versatile Python library designed to monitor and estimate the algorithmic workload of both **Deep Learning (PyTorch)** and **Machine Learning (Scikit-learn)** models. 
 
-By systematically tracking **Floating Point Operations (FLOPs)** and **BOPs (Bit-OPerations)**, it provides a hardware-independent assessment of the total computational demand, spanning from standard **Forward** and **Backward** passes to **Optimizer updates** and **Loss** evaluations.
-
+By systematically tracking **Floating Point Operations (FLOPs)**, **BOPs (Bit-OPerations)** and evaluating **Arithmetic Intensity**, it provides a hardware-independent assessment of the total computational demand, spanning from standard **Forward** and **Backward** passes to **Optimizer updates** and **Loss** evaluations.
 ## 🚀 Key Features
 
 * **Hardware-Agnostic Monitoring**: Provides a standardized measure of computational demand that does not depend on specific hardware characteristics or infrastructure;
+* **Arithmetic Intensity & Roofline Diagnostics**: Automatically calculates the theoretical Arithmetic Intensity (FLOPs/Byte), anchoring your evaluation in the **Roofline Model** to instantly diagnose whether an architecture is fundamentally *compute-bound* or *memory-bound*;
 * **Cross-Framework Support**: Seamlessly profile models from `torch` (including `Hugging Face` models) and `scikit-learn` using a unified API;
 * **Modular Architecture**: Designed with a provider pattern and structural decoupling, allowing easy extension to other backends; 
 * **Full Pipeline Tracking**: Go beyond simple inference, monitor the cost of training (Backward pass), Loss computation, Optimizer steps, and even pre-processing operations like tokenization;
 * **Transparent Integration**: Zero-boilerplate integration via a non-intrusive, hook-based architecture and safe monkey-patching;
 * **The "Escape Hatch"**: Native support for tracking **quantized layers** (e.g., 4-bit, 8-bit) and **fused/custom optimizers** (BitsAndBytes, Apex, DeepSpeed) that typically bypass standard profilers;
-* **Reproducibility**: Unlike execution time or energy metrics, FLOPs and BOPs reflect the intrinsic complexity of an algorithm, ensuring consistent results across different systems;
+* **Reproducibility**: Unlike execution time or energy metrics, FLOPs, BOPs and Arithmetic Intensity reflect the intrinsic physical structure of an algorithm, ensuring consistent results across different systems;
 * **Real-time Integration**: Supports seamless synchronization with **Weights & Biases (WandB)** for real-time visualization.
 
 ## 📊 Why FLOPpy?
 
 In an era of large-scale models and specialized hardware, execution time is no longer a sufficient metric for efficiency. **FLOPpy** allows researchers and developers to:
-1. Compare the efficiency of different architectures regardless of the GPU/CPU used;
-2. Quantify the real computational savings of quantization (FP16 vs INT8 vs INT4);
-3. Identify bottlenecks in the training loop, including the often-overlooked optimizer overhead.
+1. Compare the true algorithmic efficiency of different architectures regardless of the GPU/CPU used;
+2. Leverage the Roofline Model to diagnose performance bottlenecks, proving whether an architecture is fundamentally limited by mathematical complexity or inefficient data structures (Data Movement Overhead);
+3. Quantify the real computational savings of quantization (FP16 vs INT8 vs INT4);
+4. Identify bottlenecks in the training loop, including the often-overlooked optimizer overhead.
 
 ---
 
@@ -54,7 +55,7 @@ wandb_config = WandbConfiguration(
 
 # 1. Define your model, loss and optimizer
 model = nn.Sequential(nn.Linear(10, 10), nn.ReLU())
-loss_fn = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters())
 num_epochs = 10
 
@@ -62,14 +63,14 @@ num_epochs = 10
 tracker = FLOPpyTracker(run_name="pytorch_experiment")
 
 # 3. Run monitoring
-tracker.run(model=model, optimizer=optimizer, loss_fn=loss_fn)
+tracker.run(model=model, optimizer=optimizer, criterion=criterion)
 
 # 4. Do something with the model
 for _ in range(num_epochs):
   for xb, yb in your_data_loader:
     optimizer.zero_grad()
     y_hat = model(xb)
-    loss = loss_fn(y_hat, yb)
+    loss = criterion(y_hat, yb)
     loss.backward()
     optimizer.step()
     tracker.batch()
@@ -134,6 +135,8 @@ The `FLOPpyReport` object provides a detailed, phase-aware breakdown of the comp
 
 * **`model_forward_flops` & `model_forward_bops`**: The algorithmic cost and precision-aware hardware effort (Bit-Operations) of the forward pass. In Scikit-learn workflows, this maps to inference methods like `predict()` and `transform()`;
 * **`model_backward_flops` & `model_backward_bops`**: The computational workload required for the training phase. This captures the Autograd gradient calculation in Deep Learning, or the `fit()` method in classical Machine Learning;
+* **`forward_memory_bytes` & `backward_memory_bytes`**: The total volume of data (memory traffic) logically transferred during the inference and training phases. This granular memory breakdown is essential for isolating data movement bottlenecks;
+* **`arithmetic_intensity`**: The ratio of FLOPs to Memory Bytes transferred (FLOPs/Byte). This metric anchors your evaluation to the **Roofline Model**, allowing you to instantly diagnose whether your architecture's execution time is bottlenecked by mathematical complexity (*compute-bound*) or data movement overhead (*memory-bound*);
 * **`loss_forward_flops` & `loss_forward_bops`**: The operations and actual hardware effort explicitly tied to evaluating the loss function;
 * **`optimizer_flops` & `optimizer_bops`**: The computational overhead of the optimization step (e.g., weight updates, momentum). It accounts for the specific bit-width used, accurately tracking even fused or quantized optimizers (e.g., 8-bit Adam) via the built-in *Escape Hatch*;
 * **`preproc_ops`**: Workload from input preparation, such as tokenizer operations for Large Language Models;
@@ -142,7 +145,7 @@ The `FLOPpyReport` object provides a detailed, phase-aware breakdown of the comp
 
 ## ✍️ Authors & Citation
 
-**Francesco Scala, Francesco Mandarino, Liliana Martirano, and Luigi Pontieri.** *Institute of High Performance Computing and Networking (ICAR-CNR) & University of Calabria, Italy.*
+**Francesco Scala, Francesco Mandarino, Liliana Martirano, and Luigi Pontieri.** *Institute of High Performance Computing and Networking (ICAR-CNR), Italy.*
 
 If you use FLOPpy in your research, please cite:
 

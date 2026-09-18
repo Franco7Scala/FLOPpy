@@ -27,7 +27,7 @@ model = nn.Sequential(
     nn.ReLU(),
     nn.Linear(16, 3),
 ).to(device)
-loss_fn = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss()
 
 # Define the optimizer.
 # FLOPpy natively supports tracking various optimizers:
@@ -56,7 +56,7 @@ tracker = FLOPpyTracker(run_name="torch_test")
 tracker.run(
     model=model,
     optimizer=optimizer,
-    loss_fn=loss_fn,
+    criterion=criterion,
     export_path="torch_test.csv",
     wandb_config=wandb_config,
 )
@@ -72,7 +72,7 @@ for _ in range(num_epochs):
         optimizer.zero_grad()
         y_hat = model(xb)
 
-        loss = loss_fn(y_hat, yb)
+        loss = criterion(y_hat, yb)
         loss.backward()
         optimizer.step()
 

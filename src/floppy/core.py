@@ -20,14 +20,7 @@ class Tracker(AbstractContextManager):
     - Generate the final summary for loggers and reports
     """
 
-    def __init__(
-        self,
-        model,
-        backend: str = "auto",
-        export_path: Optional[str] = None,
-        wandb_config: Optional[WandbConfiguration] = None,
-        run_name: Optional[str] = None,
-    ):
+    def __init__(self, model, backend: str = "auto", export_path: Optional[str] = None, wandb_config: Optional[WandbConfiguration] = None, run_name: Optional[str] = None):
         self.logger = create_logger(export_path=export_path, wandb_config=wandb_config, run_name=run_name)
         self.backend = create_backend(model, backend, logger=self.logger)
 
@@ -94,6 +87,15 @@ class Tracker(AbstractContextManager):
     def total_model_backward_bop(self) -> int:
         return int(self.backend.get_total_backward_bop())
 
+    # --- Memory Bytes ---
+    @property
+    def total_model_forward_memory_bytes(self) -> int:
+        return int(getattr(self.backend, "total_forward_memory_bytes", 0))
+
+    @property
+    def total_model_backward_memory_bytes(self) -> int:
+        return int(getattr(self.backend, "total_backward_memory_bytes", 0))
+
     # ------------------------------------------------------------
     # Final metrics - preprocessing
     # ------------------------------------------------------------
@@ -135,7 +137,7 @@ class Tracker(AbstractContextManager):
         return int(self._optimizer_bop)
 
     # ------------------------------------------------------------
-    # Final totals
+    # Final totals & Arithmetic Intensity
     # ------------------------------------------------------------
 
     @property
@@ -157,6 +159,20 @@ class Tracker(AbstractContextManager):
                 + self.total_loss_backward_bop
                 + self.total_optimizer_bop
         )
+
+    @property
+    def arithmetic_intensity(self) -> float:
+        """
+        Calculates the Arithmetic Intensity (FLOPs / Memory Bytes Transferred).
+        Returns 0.0 if memory tracking is not supported by the current backend.
+        """
+        total_flops = self.total_model_forward_flop + self.total_model_backward_flop
+        total_bytes = self.total_model_forward_memory_bytes + self.total_model_backward_memory_bytes
+
+        if total_bytes > 0:
+            return float(total_flops) / float(total_bytes)
+
+        return 0.0
 
     # ------------------------------------------------------------
     # API preprocessing / tokenizer
@@ -196,7 +212,7 @@ class Tracker(AbstractContextManager):
     # ------------------------------------------------------------
     # Final summary
     # ------------------------------------------------------------
-    def build_summary_dict(self) -> Dict[str, int]:
+    def build_summary_dict(self) -> Dict[str, Any]:
         return {
             "total_model_forward_flop": self.total_model_forward_flop,
             "total_model_forward_bop": self.total_model_forward_bop,
@@ -211,25 +227,10 @@ class Tracker(AbstractContextManager):
             "total_preproc_ops": self.total_preproc_ops,
             "total_overall_flop": self.total_overall_flop,
             "total_overall_bop": self.total_overall_bop,
+            "total_forward_memory_bytes": self.total_model_forward_memory_bytes,
+            "total_backward_memory_bytes": self.total_model_backward_memory_bytes,
+            "arithmetic_intensity": self.arithmetic_intensity,
         }
 
-    def build_progress_dict(self) -> Dict[str, int]:
-        """
-        Returns the current accumulated FLOP/BOP snapshot.
-        Used for intermediate batch/epoch logging.
-        """
-        return {
-            "total_model_forward_flop": self.total_model_forward_flop,
-            "total_model_forward_bop": self.total_model_forward_bop,
-            "total_model_backward_flop": self.total_model_backward_flop,
-            "total_model_backward_bop": self.total_model_backward_bop,
-            "total_optimizer_flop": self.total_optimizer_flop,
-            "total_optimizer_bop": self.total_optimizer_bop,
-            "total_loss_forward_flop": self.total_loss_forward_flop,
-            "total_loss_forward_bop": self.total_loss_forward_bop,
-            "total_loss_backward_flop": self.total_loss_backward_flop,
-            "total_loss_backward_bop": self.total_loss_backward_bop,
-            "total_preproc_ops": self.total_preproc_ops,
-            "total_overall_flop": self.total_overall_flop,
-            "total_overall_bop": self.total_overall_bop,
-        }
+    def build_progress_dict(self) -> Dict[str, Any]:
+        return self.build_summary_dict()

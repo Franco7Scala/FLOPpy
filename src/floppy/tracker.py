@@ -84,7 +84,7 @@ class FLOPpyTracker:
         self,
         model,
         optimizer: Optional[Optimizer] = None,
-        loss_fn: Optional[Any] = None,
+        criterion: Optional[Any] = None,
         tokenizer: Optional[Any] = None,
         export_path: Optional[str] = None,
         wandb_config: Optional[WandbConfiguration] = None
@@ -95,7 +95,7 @@ class FLOPpyTracker:
         Args:
             model: The model to monitor.
             optimizer (Optional[Optimizer]): The optimizer to monitor.
-            loss_fn (Optional[Any]): The loss function to monitor.
+            criterion (Optional[Any]): The loss function to monitor.
             tokenizer (Optional[Any]): The tokenizer to monitor.
             export_path (Optional[str]): Local path to export the report.
             wandb_config (Optional[WandbConfiguration]): Weights & Biases configuration containing project name and token.
@@ -106,7 +106,7 @@ class FLOPpyTracker:
         return self.start(
             model=model,
             optimizer=optimizer,
-            loss_fn=loss_fn,
+            criterion=criterion,
             tokenizer=tokenizer,
             export_path=export_path,
             wandb_config=wandb_config
@@ -116,7 +116,7 @@ class FLOPpyTracker:
         self,
         model=None,
         optimizer: Optional[Optimizer] = None,
-        loss_fn: Optional[Any] = None,
+        criterion: Optional[Any] = None,
         tokenizer: Optional[Any] = None,
         export_path: Optional[str] = None,
         wandb_config: Optional[WandbConfiguration] = None
@@ -136,7 +136,7 @@ class FLOPpyTracker:
             self._model = model
 
         self._optimizer = optimizer
-        self._loss_fn = loss_fn
+        self._loss_fn = criterion
         self._base_tokenizer = tokenizer
         self._export_path = export_path
         self._wandb_config = wandb_config
@@ -288,6 +288,9 @@ class FLOPpyTracker:
         loss_forward_bop = int(getattr(tracker_obj, "total_loss_forward_bop", 0))
         loss_backward_bop = int(getattr(tracker_obj, "total_loss_backward_bop", 0))
         overall_bop = int(getattr(tracker_obj, "total_overall_bop", 0))
+        arithmetic_intensity = float(getattr(tracker_obj, "arithmetic_intensity", 0.0))
+        forward_memory_bytes = int(getattr(tracker_obj, "total_model_forward_memory_bytes", 0.0))
+        backward_memory_bytes = int(getattr(tracker_obj, "total_model_backward_memory_bytes", 0.0))
 
         model_architecture = "unknown"
         model_device = "CPU"
@@ -324,6 +327,9 @@ class FLOPpyTracker:
             loss_forward_bop=loss_forward_bop,
             loss_backward_bop=loss_backward_bop,
             overall_bop=overall_bop,
+            arithmetic_intensity=arithmetic_intensity,
+            forward_memory_bytes=forward_memory_bytes,
+            backward_memory_bytes=backward_memory_bytes,
             export_path=self._export_path,
             wandb_config=self._wandb_config,
             system=self._hardware

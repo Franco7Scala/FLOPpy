@@ -10,6 +10,7 @@ class UniversalFlopCounter(TorchDispatchMode):
         super().__init__()
         self.flops = 0
         self.bops = 0
+        self.memory_bytes = 0
         self.paused = False
 
     def _get_numel(self, obj):
@@ -18,6 +19,18 @@ class UniversalFlopCounter(TorchDispatchMode):
 
         elif isinstance(obj, (list, tuple)):
             return sum(self._get_numel(x) for x in obj)
+
+        return 0
+
+    def _get_bytes(self, obj):
+        if isinstance(obj, torch.Tensor):
+            return obj.numel() * obj.element_size()
+
+        elif isinstance(obj, (list, tuple)):
+            return sum(self._get_bytes(x) for x in obj)
+
+        elif isinstance(obj, dict):
+            return sum(self._get_bytes(x) for x in obj.values())
 
         return 0
 
@@ -187,5 +200,16 @@ class UniversalFlopCounter(TorchDispatchMode):
             x = args[0]
             if isinstance(x, torch.Tensor) and x.dim() >= 2:
                 self._add_ops(x.numel() * 8, args, func_str)
+
+        view_ops = [
+            "view", "reshape", "squeeze", "unsqueeze", "transpose", "t",
+            "permute", "expand", "expand_as", "flatten", "unflatten",
+            "split", "chunk", "slice", "diagonal", "flip", "contiguous"
+        ]
+
+        if base_op not in view_ops:
+            bytes_read = sum(self._get_bytes(arg) for arg in args)
+            bytes_written = self._get_bytes(out)
+            self.memory_bytes += (bytes_read + bytes_written)
 
         return out

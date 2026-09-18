@@ -28,7 +28,7 @@ model = nn.Sequential(
     nn.Linear(16, 3),
 ).to(device)
 
-loss_fn = nn.CrossEntropyLoss()
+criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 # Optional configuration for real-time telemetry on Weights & Biases
@@ -37,6 +37,8 @@ wandb_config = WandbConfiguration(
     group_name="eDPO",
     reporter_key="your_wandb_key_here",
 )
+# or
+wandb_config = None
 
 # ==========================================
 # FLOPpy INTEGRATION (CONTEXT MANAGER)
@@ -49,7 +51,7 @@ with FLOPpyTracker(run_name="torch_test") as tracker:
     tracker.start(
         model=model,
         optimizer=optimizer,
-        loss_fn=loss_fn,
+        criterion=criterion,
         export_path="torch_test.csv",
         wandb_config=wandb_config,
     )
@@ -65,7 +67,7 @@ with FLOPpyTracker(run_name="torch_test") as tracker:
             optimizer.zero_grad()
             y_hat = model(xb)
 
-            loss = loss_fn(y_hat, yb)
+            loss = criterion(y_hat, yb)
             loss.backward()
             optimizer.step()
 

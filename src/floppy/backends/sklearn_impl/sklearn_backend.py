@@ -31,6 +31,8 @@ class SklearnBackend(BaseBackend):
         self._orig_predict: Optional[Callable] = None
         self._orig_predict_proba: Optional[Callable] = None
         self._orig_transform: Optional[Callable] = None
+        self.total_forward_memory_bytes: int = 0
+        self.total_backward_memory_bytes: int = 0
 
     # ------------------------------------------------------------
     # Lifecycle
@@ -78,8 +80,11 @@ class SklearnBackend(BaseBackend):
                 flop = self._estimate_fit_flop(x_arr, y)
                 bit_width = self._get_numpy_bit_width(x_arr)
                 bops = int(flop * bit_width)
-                # 'fit' is equivalent to training, so we map it to Backward metrics
-                self._accumulate_call(flop, bops, is_training=True)
+                mem_bytes = x_arr.nbytes
+                if y is not None:
+                    mem_bytes += np.asarray(y).nbytes
+
+                self._accumulate_call(flop, bops, memory_bytes=mem_bytes, is_training=True)
 
             except Exception as e:
                 cprint(f"FLOPpy Warning: Failed to estimate fit FLOPs - {e}", Color.WARNING)
@@ -95,8 +100,8 @@ class SklearnBackend(BaseBackend):
             flop = self._estimate_predict_flop(x_arr, np.asarray(y_pred))
             bit_width = self._get_numpy_bit_width(x_arr)
             bops = int(flop * bit_width)
-            # 'predict' is inference, so we map it to Forward metrics
-            self._accumulate_call(flop, bops, is_training=False)
+            mem_bytes = x_arr.nbytes + np.asarray(y_pred).nbytes
+            self._accumulate_call(flop, bops, memory_bytes=mem_bytes, is_training=False)
             return y_pred
 
         return wrapped
@@ -108,7 +113,8 @@ class SklearnBackend(BaseBackend):
             flop = self._estimate_predict_flop(x_arr, np.asarray(proba))
             bit_width = self._get_numpy_bit_width(x_arr)
             bops = int(flop * bit_width)
-            self._accumulate_call(flop, bops, is_training=False)
+            mem_bytes = x_arr.nbytes + np.asarray(proba).nbytes
+            self._accumulate_call(flop, bops, memory_bytes=mem_bytes, is_training=False)
             return proba
 
         return wrapped
@@ -120,8 +126,8 @@ class SklearnBackend(BaseBackend):
             flop = self._estimate_transform_flop(x_arr, np.asarray(z))
             bit_width = self._get_numpy_bit_width(x_arr)
             bops = int(flop * bit_width)
-            self._accumulate_call(flop, bops, is_training=False)
-
+            mem_bytes = x_arr.nbytes + np.asarray(z).nbytes
+            self._accumulate_call(flop, bops, memory_bytes=mem_bytes, is_training=False)
             return z
 
         return wrapped
@@ -130,21 +136,25 @@ class SklearnBackend(BaseBackend):
     # FLOP accumulation
     # ------------------------------------------------------------
 
-    def _accumulate_call(self, flop: int, bop: int, is_training: bool = False):
+    def _accumulate_call(self, flop: int, bop: int, memory_bytes: int = 0, is_training: bool = False):
         self._batch_idx += 1
         value_flop = int(flop)
         value_bop = int(bop)
+        value_mem = int(memory_bytes)
+
         if is_training:
             self._last_batch_backward_flop = value_flop
             self._last_batch_backward_bop = value_bop
             self.total_backward_flop += value_flop
             self.total_backward_bop += value_bop
+            self.total_backward_memory_bytes += value_mem
 
         else:
             self._last_batch_flop = value_flop
             self._last_batch_bop = value_bop
             self.total_forward_flop += value_flop
             self.total_forward_bop += value_bop
+            self.total_forward_memory_bytes += value_mem
 
     def _get_numpy_bit_width(self, x_arr: np.ndarray) -> int:
         if x_arr is None or not hasattr(x_arr, "dtype"):

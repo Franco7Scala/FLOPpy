@@ -27,6 +27,9 @@ class TorchBackend(BaseBackend):
         self._forward_depth = 0
         self.forward_flops_at_last_backward = 0
         self.forward_bops_at_last_backward = 0
+        self.forward_bytes_at_last_backward = 0
+        self.total_forward_memory_bytes = 0
+        self.total_backward_memory_bytes = 0
 
     # ------------------------------------------------------------
     # Lifecycle
@@ -66,9 +69,11 @@ class TorchBackend(BaseBackend):
                 # 1. INCREMENTAL LOGIC: Get only the forward work done since the last backward
                 current_total_f = getattr(self, "total_forward_flop", 0)
                 current_total_b = getattr(self, "total_forward_bop", 0)
+                current_total_m = getattr(self, "total_forward_memory_bytes", 0)
 
                 step_forward_flops = current_total_f - self.forward_flops_at_last_backward
                 step_forward_bops = current_total_b - self.forward_bops_at_last_backward
+                step_forward_bytes = current_total_m - self.forward_bytes_at_last_backward
 
                 # Avoid calculating if there are no new forward FLOPs (prevents double counting)
                 if step_forward_flops <= 0:
@@ -89,12 +94,16 @@ class TorchBackend(BaseBackend):
 
                 flops_to_add = step_forward_flops * backward_multiplier
                 bops_to_add = step_forward_bops * backward_multiplier
+                bytes_to_add = step_forward_bytes * backward_multiplier
 
                 # We use the generic "total_backward_flop" which is likely what your report maps to.
                 if hasattr(self, "total_backward_flop"):
                     self.total_backward_flop += flops_to_add
+
                 if hasattr(self, "total_backward_bop"):
                     self.total_backward_bop += bops_to_add
+
+                self.total_backward_memory_bytes += bytes_to_add
 
                 # Also update the specific model-level counters for consistency
                 self.total_model_backward_flop = getattr(self, "total_model_backward_flop", 0) + flops_to_add
@@ -103,6 +112,7 @@ class TorchBackend(BaseBackend):
                 # 5. SYNC PROGRESS
                 self.forward_flops_at_last_backward = current_total_f
                 self.forward_bops_at_last_backward = current_total_b
+                self.forward_bytes_at_last_backward = current_total_m
 
             return result
 
@@ -164,6 +174,7 @@ class TorchBackend(BaseBackend):
             self._batch_idx += 1
             forward_flop = 0
             forward_bop = 0
+            forward_bytes = 0
 
             if self._flop_counter is not None:
                 # Close the context manager to stop intercepting operations
@@ -171,6 +182,7 @@ class TorchBackend(BaseBackend):
                 # Extract the calculated totals
                 forward_flop = int(getattr(self._flop_counter, "flops", 0))
                 forward_bop = int(getattr(self._flop_counter, "bops", 0))
+                forward_bytes = int(getattr(self._flop_counter, "memory_bytes", 0))
                 self._flop_counter = None
 
             # Update batch metrics
@@ -179,6 +191,7 @@ class TorchBackend(BaseBackend):
             # Update global accumulated metrics
             self.total_forward_flop += forward_flop
             self.total_forward_bop += forward_bop
+            self.total_forward_memory_bytes += forward_bytes
 
     # ------------------------------------------------------------
     # Quantized "Escape Hatch" hooks
@@ -224,6 +237,12 @@ class TorchBackend(BaseBackend):
                 # The MatMul represents the algorithmic load scaled down by the reduced bit-width,
                 # while the dequantization overhead itself is processed using standard 16-bit logic.
                 self._flop_counter.bops += (matmul_flops * bit_width) + (dequant_flops * 16)
+
+                if hasattr(self._flop_counter, "memory_bytes"):
+                    in_bytes = x.numel() * x.element_size()
+                    out_bytes = output.numel() * output.element_size() if isinstance(output, torch.Tensor) else 0
+                    weight_bytes = (num_weights * bit_width) // 8
+                    self._flop_counter.memory_bytes += (in_bytes + weight_bytes + out_bytes)
 
             # Unpause the dispatcher so it resumes listening to standard PyTorch operations
             self._flop_counter.paused = False

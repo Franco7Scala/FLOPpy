@@ -49,6 +49,12 @@ class FLOPpyReport:
     overall_flop: int
     #: The total aggregated BOPs across the entire tracked pipeline.
     overall_bop: int
+    #: The peak memory footprint (in bytes) during the forward pass.
+    forward_memory_bytes: int
+    #: The peak memory footprint (in bytes) during the backward pass.
+    backward_memory_bytes: int
+    #: The arithmetic intensity (FLOPs per byte of memory access).
+    arithmetic_intensity: float
     #: The file system path where the CSV report is saved, if applicable.
     export_path: Optional[str]
     #: The Weights & Biases configuration used for real-time logging.
@@ -141,12 +147,39 @@ class FLOPpyReport:
 
         if self.preproc_ops > 0:
             # Preprocessing is usually just operations, no specific precision weight
-            result += f"  - Preprocessing/Tokenizer : {str(self.preproc_ops) + ' Ops':>15}\n"
+            result += f"  - Preprocessing/Tokenizer : {str(self.preproc_ops) + ' Ops':>30}\n"
 
+        # Memory Workload Breakdown
+        result += "Memory Workload Breakdown:\n"
+
+        def format_bytes(size: int) -> str:
+            if size == 0:
+                return "0 B"
+
+            units = ["B", "KB", "MB", "GB", "TB", "PB"]
+            idx = 0
+            float_size = float(size)
+            while float_size >= 1024.0 and idx < len(units) - 1:
+                float_size /= 1024.0
+                idx += 1
+
+            return f"{float_size:.2f} {units[idx]}"
+
+        if self.forward_memory_bytes > 0:
+            result += f"  - Forward Memory          : {format_bytes(self.forward_memory_bytes):>30}\n"
+
+        if self.backward_memory_bytes > 0:
+            result += f"  - Backward Memory         : {format_bytes(self.backward_memory_bytes):>30}\n"
+
+        total_memory_bytes = self.forward_memory_bytes + self.backward_memory_bytes
+        bytes_str = format_bytes(total_memory_bytes)
         result += "-" * 70 + "\n"
 
         # Totals
         result += f"OVERALL TOTAL FLOPs and BOPs: {format_both(self.overall_flop, self.overall_bop)}\n"
+        result += f"OVERALL MEMORY TRANSFERRED  : {bytes_str:>30}\n"
+        intensity_str = f"{float(self.arithmetic_intensity):.2f} FLOPs/Byte"
+        result += f"OVERALL ARITHMETIC INTENSITY: {intensity_str:>30}\n"
         result += "=" * 70 + "\n"
         # Integrations
         if self.export_path or self.wandb_config:
